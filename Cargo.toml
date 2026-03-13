@@ -1,0 +1,8 @@
+[workspace]
+members = ["julep-core", "julep-renderer"]
+resolver = "2"
+
+# Local development: iced_winit is vendored in a sibling repo.
+# Create .cargo/config.toml with:
+#   [patch.crates-io]
+#   iced_winit = { path = "../iced_winit" }
