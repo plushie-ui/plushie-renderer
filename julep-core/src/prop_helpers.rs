@@ -4,7 +4,7 @@
 //! `TreeNode.props`. Extension authors use these in their `render()` and
 //! `prepare()` implementations instead of manually traversing `serde_json::Value`.
 
-use iced::{alignment, Color, ContentFit, Length};
+use iced::{Color, ContentFit, Length, alignment};
 use serde_json::Value;
 
 use crate::protocol::TreeNode;

@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{sanitize_f32, sanitize_f64, KeyModifiers, OutgoingEvent};
+use super::{KeyModifiers, OutgoingEvent, sanitize_f32, sanitize_f64};
 
 // ---------------------------------------------------------------------------
 // Widget events (click, input, toggle, slide, select, submit)

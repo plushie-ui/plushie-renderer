@@ -260,10 +260,10 @@ pub(crate) fn render_grid<'a>(
     }
 
     // Length-typed column_width: only Fixed maps to Pixels for iced's Grid::width
-    if props.and_then(|p| p.get("column_width")).is_some() {
-        if let Length::Fixed(px) = column_width {
-            g = g.width(px);
-        }
+    if props.and_then(|p| p.get("column_width")).is_some()
+        && let Length::Fixed(px) = column_width
+    {
+        g = g.width(px);
     }
 
     // Length-typed row_height: maps to Grid::height via Sizing::EvenlyDistribute

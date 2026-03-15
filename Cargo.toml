@@ -3,22 +3,26 @@ members = ["julep-core", "julep"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
-edition = "2021"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.92"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/lincracy/julep"
 
+# Local development: resolve julep-iced-* crates from the local fork.
+# Remove this section when the fork is published to crates.io.
 [patch.crates-io]
-iced = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_core = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_futures = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_runtime = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_winit = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_renderer = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_widget = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_wgpu = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_tiny_skia = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_graphics = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_debug = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_highlighter = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
-iced_program = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+julep-iced = { path = "../julep-iced" }
+julep-iced-core = { path = "../julep-iced/core" }
+julep-iced-futures = { path = "../julep-iced/futures" }
+julep-iced-runtime = { path = "../julep-iced/runtime" }
+julep-iced-winit = { path = "../julep-iced/winit" }
+julep-iced-renderer = { path = "../julep-iced/renderer" }
+julep-iced-widget = { path = "../julep-iced/widget" }
+julep-iced-wgpu = { path = "../julep-iced/wgpu" }
+julep-iced-tiny-skia = { path = "../julep-iced/tiny_skia" }
+julep-iced-graphics = { path = "../julep-iced/graphics" }
+julep-iced-debug = { path = "../julep-iced/debug" }
+julep-iced-highlighter = { path = "../julep-iced/highlighter" }
+julep-iced-program = { path = "../julep-iced/program" }
+julep-iced-test = { path = "../julep-iced/test" }

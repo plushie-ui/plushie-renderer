@@ -167,10 +167,10 @@ fn search_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<Value> {
         return None;
     }
     for key in &["content", "label", "value", "placeholder"] {
-        if let Some(val) = node.props.get(*key) {
-            if val.as_str() == Some(text) {
-                return serde_json::to_value(node).ok();
-            }
+        if let Some(val) = node.props.get(*key)
+            && val.as_str() == Some(text)
+        {
+            return serde_json::to_value(node).ok();
         }
     }
     for child in &node.children {
@@ -186,10 +186,10 @@ fn find_id_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<String> 
         return None;
     }
     for key in &["content", "label", "value", "placeholder"] {
-        if let Some(val) = node.props.get(*key) {
-            if val.as_str() == Some(text) {
-                return Some(node.id.clone());
-            }
+        if let Some(val) = node.props.get(*key)
+            && val.as_str() == Some(text)
+        {
+            return Some(node.id.clone());
         }
     }
     for child in &node.children {

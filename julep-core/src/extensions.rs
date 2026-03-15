@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use iced::{Element, Theme};
@@ -805,8 +805,8 @@ impl Default for GenerationCounter {
 // ---------------------------------------------------------------------------
 
 fn render_poisoned_placeholder<'a>(node: &TreeNode) -> Element<'a, Message> {
-    use iced::widget::text;
     use iced::Color;
+    use iced::widget::text;
     text(format!(
         "Extension error: type `{}`, node `{}`",
         node.type_name, node.id

@@ -7,20 +7,20 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use iced::widget::{container, pane_grid, text};
-use iced::{event, system, window, Element, Fill, Point, Subscription, Task, Theme};
+use iced::{Element, Fill, Point, Subscription, Task, Theme, event, system, window};
 
 use julep_core::codec::Codec;
 use julep_core::extensions::{EventResult, ExtensionDispatcher};
 use julep_core::message::{
-    serialize_modifiers, serialize_mouse_button, serialize_scroll_delta, KeyEventData, Message,
-    StdinEvent,
+    KeyEventData, Message, StdinEvent, serialize_modifiers, serialize_mouse_button,
+    serialize_scroll_delta,
 };
 use julep_core::protocol::{IncomingMessage, OutgoingEvent};
 
 #[cfg(feature = "test-mode")]
 use emitters::emit_screenshot_response;
 use emitters::{emit_effect_response, emit_event, emit_hello, message_to_event};
-use stdin::{read_initial_settings, spawn_stdin_reader, stdin_subscription, STDIN_RX};
+use stdin::{STDIN_RX, read_initial_settings, spawn_stdin_reader, stdin_subscription};
 
 // ---------------------------------------------------------------------------
 // App state
@@ -81,23 +81,22 @@ impl App {
     }
 
     fn title_for_window(&self, window_id: window::Id) -> String {
-        if let Some(julep_id) = self.reverse_window_map.get(&window_id) {
-            if let Some(node) = self.core.tree.find_window(julep_id) {
-                if let Some(title) = node.props.get("title").and_then(|v| v.as_str()) {
-                    // Strip control characters to prevent injection into
-                    // window titles / terminal escape sequences.
-                    return title.chars().filter(|c| !c.is_control()).collect();
-                }
-            }
+        if let Some(julep_id) = self.reverse_window_map.get(&window_id)
+            && let Some(node) = self.core.tree.find_window(julep_id)
+            && let Some(title) = node.props.get("title").and_then(|v| v.as_str())
+        {
+            // Strip control characters to prevent injection into
+            // window titles / terminal escape sequences.
+            return title.chars().filter(|c| !c.is_control()).collect();
         }
         "Julep".to_string()
     }
 
     fn theme_for_window(&self, window_id: window::Id) -> Theme {
-        if let Some(julep_id) = self.reverse_window_map.get(&window_id) {
-            if let Some(cached) = self.window_theme_cache.get(julep_id) {
-                return cached.clone();
-            }
+        if let Some(julep_id) = self.reverse_window_map.get(&window_id)
+            && let Some(cached) = self.window_theme_cache.get(julep_id)
+        {
+            return cached.clone();
         }
         if self.theme_follows_system {
             self.system_theme.clone()
@@ -877,17 +876,17 @@ impl App {
     }
 
     fn handle_pane_dragged(&mut self, grid_id: String, evt: pane_grid::DragEvent) -> Task<Message> {
-        if let pane_grid::DragEvent::Dropped { pane, target } = evt {
-            if let Some(state) = self.core.caches.pane_grid_state_mut(&grid_id) {
-                // Look up julep IDs for the panes before swapping
-                let pane_id = state.get(pane).cloned().unwrap_or_default();
-                let target_pane = match target {
-                    pane_grid::Target::Edge(_) => "edge".to_string(),
-                    pane_grid::Target::Pane(p, _) => state.get(p).cloned().unwrap_or_default(),
-                };
-                state.drop(pane, target);
-                emit_event(OutgoingEvent::pane_dragged(grid_id, pane_id, target_pane));
-            }
+        if let pane_grid::DragEvent::Dropped { pane, target } = evt
+            && let Some(state) = self.core.caches.pane_grid_state_mut(&grid_id)
+        {
+            // Look up julep IDs for the panes before swapping
+            let pane_id = state.get(pane).cloned().unwrap_or_default();
+            let target_pane = match target {
+                pane_grid::Target::Edge(_) => "edge".to_string(),
+                pane_grid::Target::Pane(p, _) => state.get(p).cloned().unwrap_or_default(),
+            };
+            state.drop(pane, target);
+            emit_event(OutgoingEvent::pane_dragged(grid_id, pane_id, target_pane));
         }
         Task::none()
     }
@@ -1378,14 +1377,14 @@ impl App {
             // Rebuild per-window theme cache from current tree.
             self.window_theme_cache.clear();
             for win_id in self.core.tree.window_ids() {
-                if let Some(node) = self.core.tree.find_window(&win_id) {
-                    if let Some(theme_val) = node.props.get("theme") {
-                        if let Some(theme) = julep_core::theming::resolve_theme_only(theme_val) {
-                            self.window_theme_cache.insert(win_id, theme);
-                        }
-                        // None means "system" -- no cache entry, falls through
-                        // to the system_theme path in theme_for_window().
-                    }
+                // When resolve_theme_only returns None it means "system" --
+                // no cache entry, falls through to the system_theme path
+                // in theme_for_window().
+                if let Some(node) = self.core.tree.find_window(&win_id)
+                    && let Some(theme_val) = node.props.get("theme")
+                    && let Some(theme) = julep_core::theming::resolve_theme_only(theme_val)
+                {
+                    self.window_theme_cache.insert(win_id, theme);
                 }
             }
 

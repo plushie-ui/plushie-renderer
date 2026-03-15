@@ -161,10 +161,10 @@ pub(crate) fn render_mouse_area<'a>(
         });
     }
 
-    if let Some(cursor) = prop_str(props, "cursor") {
-        if let Some(interaction) = parse_interaction(&cursor) {
-            ma = ma.interaction(interaction);
-        }
+    if let Some(cursor) = prop_str(props, "cursor")
+        && let Some(interaction) = parse_interaction(&cursor)
+    {
+        ma = ma.interaction(interaction);
     }
 
     ma.into()

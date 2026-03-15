@@ -1,5 +1,5 @@
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::io::{self, BufRead, Read};
 use std::sync::OnceLock;
 
@@ -1093,7 +1093,7 @@ mod tests {
         // Also test with a single byte of each container type
         assert!(check_msgpack_depth(&[0x81], 128).is_ok()); // fixmap(1)
         assert!(check_msgpack_depth(&[0x91], 128).is_ok()); // fixarray(1)
-                                                            // Truncated length fields
+        // Truncated length fields
         assert!(check_msgpack_depth(&[0xdc], 128).is_ok()); // array16, no length
         assert!(check_msgpack_depth(&[0xde, 0x00], 128).is_ok()); // map16, partial
     }

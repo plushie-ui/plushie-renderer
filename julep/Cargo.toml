@@ -2,6 +2,7 @@
 name = "julep"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -17,14 +18,14 @@ path = "src/main.rs"
 julep-core = { path = "../julep-core" }
 env_logger = "0.11"
 log = "0.4"
-iced = { version = "0.14", features = ["tokio", "advanced"] }
+iced = { version = "0.6", package = "julep-iced", features = ["tokio", "advanced"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 tokio = { version = "1", features = ["sync"] }
-iced_test = { version = "0.14", optional = true }
+iced_test = { version = "0.6", package = "julep-iced-test", optional = true }
 sha2 = { version = "0.10", optional = true }
-iced_winit = { version = "0.14", optional = true }
+iced_winit = { version = "0.6", package = "julep-iced-winit", optional = true }
 
 [features]
 default = ["builtin-all", "dialogs", "clipboard", "notifications", "a11y"]
@@ -54,5 +55,5 @@ notifications = ["julep-core/notifications"]
 headless = ["iced_test", "sha2"]
 # Full test mode (real iced::daemon + test protocol messages).
 test-mode = ["sha2"]
-# Accessibility via accesskit. Requires the iced fork with a11y support.
+# Accessibility via accesskit.
 a11y = ["julep-core/a11y", "dep:iced_winit", "iced_winit/a11y"]

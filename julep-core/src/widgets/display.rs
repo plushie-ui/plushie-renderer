@@ -153,8 +153,8 @@ pub(crate) fn render_image<'a>(
     node: &'a TreeNode,
     images: &'a crate::image_registry::ImageRegistry,
 ) -> Element<'a, Message> {
-    use iced::widget::image::FilterMethod;
     use iced::widget::Image;
+    use iced::widget::image::FilterMethod;
 
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);
@@ -260,10 +260,10 @@ pub(crate) fn render_svg<'a>(node: &'a TreeNode) -> Element<'a, Message> {
     if let Some(o) = prop_f32(props, "opacity") {
         s = s.opacity(o);
     }
-    if let Some(color_str) = prop_str(props, "color") {
-        if let Some(c) = crate::theming::parse_hex_color(&color_str) {
-            s = s.style(move |_theme, _status| iced::widget::svg::Style { color: Some(c) });
-        }
+    if let Some(color_str) = prop_str(props, "color")
+        && let Some(c) = crate::theming::parse_hex_color(&color_str)
+    {
+        s = s.style(move |_theme, _status| iced::widget::svg::Style { color: Some(c) });
     }
 
     s.into()
@@ -494,7 +494,7 @@ impl canvas::Program<Message> for QrCodeProgram<'_> {
             }
         };
 
-        if let Some((_hash, ref cache)) = self.cache {
+        if let Some((_hash, cache)) = self.cache {
             vec![cache.draw(renderer, bounds.size(), draw_fn)]
         } else {
             let mut frame = canvas::Frame::new(renderer, bounds.size());

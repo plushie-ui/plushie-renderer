@@ -4,7 +4,7 @@
 //! OS-native path separators (`/` on Unix, `\` on Windows). Cross-platform
 //! consumers should normalize paths before comparing or storing them.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::protocol::EffectResponse;
 
@@ -70,16 +70,15 @@ fn handle_file_open(id: String, payload: &Value) -> EffectResponse {
 
     if let Some(filters) = payload.get("filters").and_then(|v| v.as_array()) {
         for filter in filters {
-            if let Some(arr) = filter.as_array() {
-                if arr.len() >= 2 {
-                    if let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str()) {
-                        let extensions: Vec<&str> = ext
-                            .split(';')
-                            .map(|e| e.trim().trim_start_matches("*."))
-                            .collect();
-                        dialog = dialog.add_filter(name, &extensions);
-                    }
-                }
+            if let Some(arr) = filter.as_array()
+                && arr.len() >= 2
+                && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
+            {
+                let extensions: Vec<&str> = ext
+                    .split(';')
+                    .map(|e| e.trim().trim_start_matches("*."))
+                    .collect();
+                dialog = dialog.add_filter(name, &extensions);
             }
         }
     }
@@ -119,16 +118,15 @@ fn handle_file_save(id: String, payload: &Value) -> EffectResponse {
 
     if let Some(filters) = payload.get("filters").and_then(|v| v.as_array()) {
         for filter in filters {
-            if let Some(arr) = filter.as_array() {
-                if arr.len() >= 2 {
-                    if let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str()) {
-                        let extensions: Vec<&str> = ext
-                            .split(';')
-                            .map(|e| e.trim().trim_start_matches("*."))
-                            .collect();
-                        dialog = dialog.add_filter(name, &extensions);
-                    }
-                }
+            if let Some(arr) = filter.as_array()
+                && arr.len() >= 2
+                && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
+            {
+                let extensions: Vec<&str> = ext
+                    .split(';')
+                    .map(|e| e.trim().trim_start_matches("*."))
+                    .collect();
+                dialog = dialog.add_filter(name, &extensions);
             }
         }
     }
@@ -199,7 +197,10 @@ fn with_clipboard(
                 guard.as_mut().unwrap()
             }
             Err(e) => {
-                return EffectResponse::error(id.to_string(), format!("clipboard init failed: {e}"))
+                return EffectResponse::error(
+                    id.to_string(),
+                    format!("clipboard init failed: {e}"),
+                );
             }
         },
     };
@@ -365,16 +366,15 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
 
             if let Some(filters) = params.get("filters").and_then(|v| v.as_array()) {
                 for filter in filters {
-                    if let Some(arr) = filter.as_array() {
-                        if arr.len() >= 2 {
-                            if let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str()) {
-                                let extensions: Vec<&str> = ext
-                                    .split(';')
-                                    .map(|e| e.trim().trim_start_matches("*."))
-                                    .collect();
-                                dialog = dialog.add_filter(name, &extensions);
-                            }
-                        }
+                    if let Some(arr) = filter.as_array()
+                        && arr.len() >= 2
+                        && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
+                    {
+                        let extensions: Vec<&str> = ext
+                            .split(';')
+                            .map(|e| e.trim().trim_start_matches("*."))
+                            .collect();
+                        dialog = dialog.add_filter(name, &extensions);
                     }
                 }
             }
@@ -404,16 +404,15 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
 
             if let Some(filters) = params.get("filters").and_then(|v| v.as_array()) {
                 for filter in filters {
-                    if let Some(arr) = filter.as_array() {
-                        if arr.len() >= 2 {
-                            if let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str()) {
-                                let extensions: Vec<&str> = ext
-                                    .split(';')
-                                    .map(|e| e.trim().trim_start_matches("*."))
-                                    .collect();
-                                dialog = dialog.add_filter(name, &extensions);
-                            }
-                        }
+                    if let Some(arr) = filter.as_array()
+                        && arr.len() >= 2
+                        && let (Some(name), Some(ext)) = (arr[0].as_str(), arr[1].as_str())
+                    {
+                        let extensions: Vec<&str> = ext
+                            .split(';')
+                            .map(|e| e.trim().trim_start_matches("*."))
+                            .collect();
+                        dialog = dialog.add_filter(name, &extensions);
                     }
                 }
             }

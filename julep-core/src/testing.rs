@@ -4,7 +4,7 @@
 //! `ExtensionCaches` so extension tests don't need to import half the crate.
 
 use iced::Theme;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::extensions::{ExtensionCaches, ExtensionDispatcher, RenderContext, WidgetEnv};
 use crate::image_registry::ImageRegistry;
@@ -253,17 +253,17 @@ mod tests {
         let mut caches = ext_caches();
         caches.insert("spark", "spark-1:gen".to_string(), GenerationCounter::new());
 
-        let gen = caches
+        let counter = caches
             .get_mut::<GenerationCounter>("spark", "spark-1:gen")
             .unwrap();
-        assert_eq!(gen.get(), 0);
-        gen.bump();
-        assert_eq!(gen.get(), 1);
+        assert_eq!(counter.get(), 0);
+        counter.bump();
+        assert_eq!(counter.get(), 1);
 
         // Re-borrow to verify persistence
-        let gen = caches
+        let counter = caches
             .get::<GenerationCounter>("spark", "spark-1:gen")
             .unwrap();
-        assert_eq!(gen.get(), 1);
+        assert_eq!(counter.get(), 1);
     }
 }

@@ -4,8 +4,8 @@ use iced::widget::{
     toggler,
 };
 use iced::{
-    alignment, font, mouse, Border, Color, ContentFit, Fill, Font, Length, Padding, Pixels,
-    Radians, Shadow, Vector,
+    Border, Color, ContentFit, Fill, Font, Length, Padding, Pixels, Radians, Shadow, Vector,
+    alignment, font, mouse,
 };
 use serde_json::Value;
 

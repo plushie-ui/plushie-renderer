@@ -30,10 +30,10 @@ pub fn resolve_theme(value: &Value) -> ThemeResult {
 
 /// Resolve a theme value, returning `None` for `"system"` (follow OS preference).
 pub fn resolve_theme_only(value: &Value) -> Option<Theme> {
-    if let Some(s) = value.as_str() {
-        if s.eq_ignore_ascii_case("system") {
-            return None;
-        }
+    if let Some(s) = value.as_str()
+        && s.eq_ignore_ascii_case("system")
+    {
+        return None;
     }
     Some(resolve_theme(value).theme)
 }
@@ -79,7 +79,7 @@ fn resolve_builtin(s: &str) -> Theme {
 ///
 /// Supported fields (all optional):
 /// - "name"       - display name for the theme (default: "Custom")
-/// - "base"       - built-in theme name whose palette is used as the starting
+/// - "base"       - built-in theme name whose seed is used as the starting
 ///   point (default: dark)
 /// - "background" - hex color string, e.g. "#1a1b26"
 /// - "text"       - hex color string
@@ -94,25 +94,25 @@ fn custom_theme_from_object(obj: &serde_json::Map<String, Value>) -> Theme {
         .map(resolve_builtin)
         .unwrap_or(Theme::Dark);
 
-    let mut palette = base_theme.palette();
+    let mut seed = base_theme.seed();
 
     if let Some(color) = get_color(obj, "background") {
-        palette.background = color;
+        seed.background = color;
     }
     if let Some(color) = get_color(obj, "text") {
-        palette.text = color;
+        seed.text = color;
     }
     if let Some(color) = get_color(obj, "primary") {
-        palette.primary = color;
+        seed.primary = color;
     }
     if let Some(color) = get_color(obj, "success") {
-        palette.success = color;
+        seed.success = color;
     }
     if let Some(color) = get_color(obj, "warning") {
-        palette.warning = color;
+        seed.warning = color;
     }
     if let Some(color) = get_color(obj, "danger") {
-        palette.danger = color;
+        seed.danger = color;
     }
 
     let name = obj
@@ -123,18 +123,18 @@ fn custom_theme_from_object(obj: &serde_json::Map<String, Value>) -> Theme {
 
     if has_shade_keys(obj) {
         let shade_obj = obj.clone();
-        Theme::custom_with_fn(name, palette, move |p| {
-            let mut ext = palette::Extended::generate(p);
-            apply_shade_overrides(&mut ext, &shade_obj);
-            ext
+        Theme::custom_with_fn(name, seed, move |s| {
+            let mut pal = palette::Palette::generate(s);
+            apply_shade_overrides(&mut pal, &shade_obj);
+            pal
         })
     } else {
-        Theme::custom(name, palette)
+        Theme::custom(name, seed)
     }
 }
 
 // ---------------------------------------------------------------------------
-// Extended palette shade overrides
+// Palette shade overrides
 // ---------------------------------------------------------------------------
 
 /// Shade keys that can appear in a custom theme object.
@@ -171,52 +171,52 @@ fn has_shade_keys(obj: &serde_json::Map<String, Value>) -> bool {
         .any(|k| obj.contains_key(*k) || obj.contains_key(&format!("{}_text", k)))
 }
 
-/// Apply shade overrides from the JSON object onto the extended palette.
-fn apply_shade_overrides(ext: &mut palette::Extended, obj: &serde_json::Map<String, Value>) {
+/// Apply shade overrides from the JSON object onto the generated palette.
+fn apply_shade_overrides(pal: &mut palette::Palette, obj: &serde_json::Map<String, Value>) {
     // Primary / secondary / success / warning / danger families
-    override_pair(&mut ext.primary.base, obj, "primary_base");
-    override_pair(&mut ext.primary.weak, obj, "primary_weak");
-    override_pair(&mut ext.primary.strong, obj, "primary_strong");
+    override_pair(&mut pal.primary.base, obj, "primary_base");
+    override_pair(&mut pal.primary.weak, obj, "primary_weak");
+    override_pair(&mut pal.primary.strong, obj, "primary_strong");
 
-    override_pair(&mut ext.secondary.base, obj, "secondary_base");
-    override_pair(&mut ext.secondary.weak, obj, "secondary_weak");
-    override_pair(&mut ext.secondary.strong, obj, "secondary_strong");
+    override_pair(&mut pal.secondary.base, obj, "secondary_base");
+    override_pair(&mut pal.secondary.weak, obj, "secondary_weak");
+    override_pair(&mut pal.secondary.strong, obj, "secondary_strong");
 
-    override_pair(&mut ext.success.base, obj, "success_base");
-    override_pair(&mut ext.success.weak, obj, "success_weak");
-    override_pair(&mut ext.success.strong, obj, "success_strong");
+    override_pair(&mut pal.success.base, obj, "success_base");
+    override_pair(&mut pal.success.weak, obj, "success_weak");
+    override_pair(&mut pal.success.strong, obj, "success_strong");
 
-    override_pair(&mut ext.warning.base, obj, "warning_base");
-    override_pair(&mut ext.warning.weak, obj, "warning_weak");
-    override_pair(&mut ext.warning.strong, obj, "warning_strong");
+    override_pair(&mut pal.warning.base, obj, "warning_base");
+    override_pair(&mut pal.warning.weak, obj, "warning_weak");
+    override_pair(&mut pal.warning.strong, obj, "warning_strong");
 
-    override_pair(&mut ext.danger.base, obj, "danger_base");
-    override_pair(&mut ext.danger.weak, obj, "danger_weak");
-    override_pair(&mut ext.danger.strong, obj, "danger_strong");
+    override_pair(&mut pal.danger.base, obj, "danger_base");
+    override_pair(&mut pal.danger.weak, obj, "danger_weak");
+    override_pair(&mut pal.danger.strong, obj, "danger_strong");
 
     // Background family (8 levels)
-    override_pair(&mut ext.background.base, obj, "background_base");
-    override_pair(&mut ext.background.weakest, obj, "background_weakest");
-    override_pair(&mut ext.background.weaker, obj, "background_weaker");
-    override_pair(&mut ext.background.weak, obj, "background_weak");
-    override_pair(&mut ext.background.neutral, obj, "background_neutral");
-    override_pair(&mut ext.background.strong, obj, "background_strong");
-    override_pair(&mut ext.background.stronger, obj, "background_stronger");
-    override_pair(&mut ext.background.strongest, obj, "background_strongest");
+    override_pair(&mut pal.background.base, obj, "background_base");
+    override_pair(&mut pal.background.weakest, obj, "background_weakest");
+    override_pair(&mut pal.background.weaker, obj, "background_weaker");
+    override_pair(&mut pal.background.weak, obj, "background_weak");
+    override_pair(&mut pal.background.neutral, obj, "background_neutral");
+    override_pair(&mut pal.background.strong, obj, "background_strong");
+    override_pair(&mut pal.background.stronger, obj, "background_stronger");
+    override_pair(&mut pal.background.strongest, obj, "background_strongest");
 }
 
 /// Override a single Pair's color and/or text from the JSON object.
 fn override_pair(pair: &mut palette::Pair, obj: &serde_json::Map<String, Value>, key: &str) {
-    if let Some(hex) = obj.get(key).and_then(|v| v.as_str()) {
-        if let Some(color) = parse_hex_color(hex) {
-            pair.color = color;
-        }
+    if let Some(hex) = obj.get(key).and_then(|v| v.as_str())
+        && let Some(color) = parse_hex_color(hex)
+    {
+        pair.color = color;
     }
     let text_key = format!("{}_text", key);
-    if let Some(hex) = obj.get(&text_key).and_then(|v| v.as_str()) {
-        if let Some(color) = parse_hex_color(hex) {
-            pair.text = color;
-        }
+    if let Some(hex) = obj.get(&text_key).and_then(|v| v.as_str())
+        && let Some(color) = parse_hex_color(hex)
+    {
+        pair.text = color;
     }
 }
 
@@ -253,7 +253,6 @@ pub fn parse_hex_color(hex: &str) -> Option<Color> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::theme::Palette;
     use serde_json::json;
 
     #[test]
@@ -304,32 +303,32 @@ mod tests {
             "danger": "#f7768e"
         });
         let result = resolve_theme(&val);
-        let p = result.theme.palette();
-        assert_eq!(p.background, Color::from_rgb8(0x1a, 0x1b, 0x26));
-        assert_eq!(p.text, Color::from_rgb8(0xc0, 0xca, 0xf5));
-        assert_eq!(p.primary, Color::from_rgb8(0x7a, 0xa2, 0xf7));
-        assert_eq!(p.success, Color::from_rgb8(0x9e, 0xce, 0x6a));
-        assert_eq!(p.danger, Color::from_rgb8(0xf7, 0x76, 0x8e));
+        let seed = result.theme.seed();
+        assert_eq!(seed.background, Color::from_rgb8(0x1a, 0x1b, 0x26));
+        assert_eq!(seed.text, Color::from_rgb8(0xc0, 0xca, 0xf5));
+        assert_eq!(seed.primary, Color::from_rgb8(0x7a, 0xa2, 0xf7));
+        assert_eq!(seed.success, Color::from_rgb8(0x9e, 0xce, 0x6a));
+        assert_eq!(seed.danger, Color::from_rgb8(0xf7, 0x76, 0x8e));
     }
 
     #[test]
     fn custom_theme_with_warning_color() {
         let val = json!({"warning": "#f9e2af"});
         let result = resolve_theme(&val);
-        let p = result.theme.palette();
-        assert_eq!(p.warning, Color::from_rgb8(0xf9, 0xe2, 0xaf));
+        let seed = result.theme.seed();
+        assert_eq!(seed.warning, Color::from_rgb8(0xf9, 0xe2, 0xaf));
     }
 
     #[test]
     fn custom_theme_with_base() {
         let val = json!({"base": "Nord", "primary": "#88c0d0"});
         let result = resolve_theme(&val);
-        let p = result.theme.palette();
+        let seed = result.theme.seed();
         // Primary should be overridden.
-        assert_eq!(p.primary, Color::from_rgb8(0x88, 0xc0, 0xd0));
-        // Background should come from Nord's palette.
-        let nord_bg = Theme::Nord.palette().background;
-        assert_eq!(p.background, nord_bg);
+        assert_eq!(seed.primary, Color::from_rgb8(0x88, 0xc0, 0xd0));
+        // Background should come from Nord's seed.
+        let nord_bg = Theme::Nord.seed().background;
+        assert_eq!(seed.background, nord_bg);
     }
 
     #[test]
@@ -372,10 +371,10 @@ mod tests {
     fn bad_color_field_is_ignored() {
         let val = json!({"background": "not-a-color", "text": "#ffffff"});
         let result = resolve_theme(&val);
-        let p = result.theme.palette();
+        let seed = result.theme.seed();
         // text should be set, background should remain the dark default.
-        assert_eq!(p.text, Color::from_rgb8(0xff, 0xff, 0xff));
-        assert_eq!(p.background, Palette::DARK.background);
+        assert_eq!(seed.text, Color::from_rgb8(0xff, 0xff, 0xff));
+        assert_eq!(seed.background, palette::Seed::DARK.background);
     }
 
     #[test]
@@ -385,8 +384,8 @@ mod tests {
             "primary_strong": "#1a5276"
         });
         let result = resolve_theme(&val);
-        let ext = result.theme.extended_palette();
-        assert_eq!(ext.primary.strong.color, Color::from_rgb8(0x1a, 0x52, 0x76));
+        let pal = result.theme.palette();
+        assert_eq!(pal.primary.strong.color, Color::from_rgb8(0x1a, 0x52, 0x76));
     }
 
     #[test]
@@ -396,8 +395,8 @@ mod tests {
             "primary_strong_text": "#ffffff"
         });
         let result = resolve_theme(&val);
-        let ext = result.theme.extended_palette();
-        assert_eq!(ext.primary.strong.text, Color::from_rgb8(0xff, 0xff, 0xff));
+        let pal = result.theme.palette();
+        assert_eq!(pal.primary.strong.text, Color::from_rgb8(0xff, 0xff, 0xff));
     }
 
     #[test]
@@ -405,12 +404,12 @@ mod tests {
         // No shade keys -- should use Theme::custom (standard generation).
         let val = json!({"primary": "#ff0000"});
         let result = resolve_theme(&val);
-        let ext = result.theme.extended_palette();
-        // The generated extended palette should match what Extended::generate
-        // produces for the same palette.
-        let expected = palette::Extended::generate(result.theme.palette());
-        assert_eq!(ext.primary.strong.color, expected.primary.strong.color);
-        assert_eq!(ext.primary.weak.color, expected.primary.weak.color);
+        let pal = result.theme.palette();
+        // The generated palette should match what Palette::generate
+        // produces for the same seed.
+        let expected = palette::Palette::generate(result.theme.seed());
+        assert_eq!(pal.primary.strong.color, expected.primary.strong.color);
+        assert_eq!(pal.primary.weak.color, expected.primary.weak.color);
     }
 
     #[test]
@@ -421,13 +420,13 @@ mod tests {
             "background_weakest_text": "#aaaaaa"
         });
         let result = resolve_theme(&val);
-        let ext = result.theme.extended_palette();
+        let pal = result.theme.palette();
         assert_eq!(
-            ext.background.weakest.color,
+            pal.background.weakest.color,
             Color::from_rgb8(0x0d, 0x0d, 0x1a)
         );
         assert_eq!(
-            ext.background.weakest.text,
+            pal.background.weakest.text,
             Color::from_rgb8(0xaa, 0xaa, 0xaa)
         );
     }

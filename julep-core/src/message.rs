@@ -6,7 +6,7 @@
 #[cfg(feature = "widget-markdown")]
 use iced::widget::markdown;
 use iced::widget::text_editor;
-use iced::{window, Point};
+use iced::{Point, window};
 use serde_json::Value;
 
 use crate::protocol::KeyModifiers;

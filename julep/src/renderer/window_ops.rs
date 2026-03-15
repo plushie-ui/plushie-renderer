@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use base64::Engine as _;
-use iced::{window, Point, Size, Task};
+use iced::{Point, Size, Task, window};
 
 use julep_core::message::Message;
 
-use super::emitters::{emit_effect_response, emit_query_response};
 use super::App;
+use super::emitters::{emit_effect_response, emit_query_response};
 
 // ---------------------------------------------------------------------------
 // Window operations (impl App)
@@ -688,11 +688,11 @@ impl App {
 
         // Close windows that are open but no longer in the tree.
         for win_id in &open_windows {
-            if !tree_windows.contains(win_id) {
-                if let Some(iced_id) = self.window_map.remove(win_id) {
-                    self.reverse_window_map.remove(&iced_id);
-                    tasks.push(window::close(iced_id));
-                }
+            if !tree_windows.contains(win_id)
+                && let Some(iced_id) = self.window_map.remove(win_id)
+            {
+                self.reverse_window_map.remove(&iced_id);
+                tasks.push(window::close(iced_id));
             }
         }
 

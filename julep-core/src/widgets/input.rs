@@ -367,10 +367,10 @@ pub(crate) fn render_text_editor<'a>(
                             Some(c) if c.to_string() == *key_char => {}
                             _ => continue,
                         }
-                    } else if let Some(ref named_key) = rule.named {
-                        if !match_named_key(named_key, &key_press.key) {
-                            continue;
-                        }
+                    } else if let Some(ref named_key) = rule.named
+                        && !match_named_key(named_key, &key_press.key)
+                    {
+                        continue;
                     }
                     // else: no key/named constraint -- matches any key (catch-all rule)
 
@@ -507,64 +507,62 @@ pub(crate) fn render_checkbox<'a>(
         cb = cb.font(f);
     }
     if let Some(lh) = parse_line_height(props) {
-        cb = cb.text_line_height(lh);
+        cb = cb.line_height(lh);
     }
     if let Some(shaping) = parse_shaping(props) {
-        cb = cb.text_shaping(shaping);
+        cb = cb.shaping(shaping);
     }
     if let Some(w) = parse_wrapping(props) {
-        cb = cb.text_wrapping(w);
+        cb = cb.wrapping(w);
     }
     if let Some(icon_val) = props
         .and_then(|p| p.get("icon"))
         .and_then(|v| v.as_object())
+        && let Some(cp_str) = icon_val.get("code_point").and_then(|v| v.as_str())
+        && let Some(code_point) = cp_str.chars().next()
     {
-        if let Some(cp_str) = icon_val.get("code_point").and_then(|v| v.as_str()) {
-            if let Some(code_point) = cp_str.chars().next() {
-                let icon_font = icon_val
-                    .get("font")
-                    .map(parse_font)
-                    .unwrap_or(Font::DEFAULT);
-                let icon_size = icon_val
-                    .get("size")
-                    .and_then(|v| v.as_f64())
-                    .map(|v| Pixels(v as f32));
-                let icon_line_height = icon_val
-                    .get("line_height")
-                    .and_then(|v| match v {
-                        Value::Number(n) => n.as_f64().map(|r| LineHeight::Relative(r as f32)),
-                        Value::Object(obj) => {
-                            if let Some(r) = obj.get("relative").and_then(|v| v.as_f64()) {
-                                Some(LineHeight::Relative(r as f32))
-                            } else {
-                                obj.get("absolute")
-                                    .and_then(|v| v.as_f64())
-                                    .map(|a| LineHeight::Absolute(Pixels(a as f32)))
-                            }
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or(LineHeight::default());
-                let icon_shaping = icon_val
-                    .get("shaping")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| match s.to_ascii_lowercase().as_str() {
-                        "basic" => Some(iced::widget::text::Shaping::Basic),
-                        "advanced" => Some(iced::widget::text::Shaping::Advanced),
-                        "auto" => Some(iced::widget::text::Shaping::Auto),
-                        _ => None,
-                    })
-                    .unwrap_or(iced::widget::text::Shaping::Auto);
-                let icon_struct = checkbox::Icon {
-                    font: icon_font,
-                    code_point,
-                    size: icon_size,
-                    line_height: icon_line_height,
-                    shaping: icon_shaping,
-                };
-                cb = cb.icon(icon_struct);
-            }
-        }
+        let icon_font = icon_val
+            .get("font")
+            .map(parse_font)
+            .unwrap_or(Font::DEFAULT);
+        let icon_size = icon_val
+            .get("size")
+            .and_then(|v| v.as_f64())
+            .map(|v| Pixels(v as f32));
+        let icon_line_height = icon_val
+            .get("line_height")
+            .and_then(|v| match v {
+                Value::Number(n) => n.as_f64().map(|r| LineHeight::Relative(r as f32)),
+                Value::Object(obj) => {
+                    if let Some(r) = obj.get("relative").and_then(|v| v.as_f64()) {
+                        Some(LineHeight::Relative(r as f32))
+                    } else {
+                        obj.get("absolute")
+                            .and_then(|v| v.as_f64())
+                            .map(|a| LineHeight::Absolute(Pixels(a as f32)))
+                    }
+                }
+                _ => None,
+            })
+            .unwrap_or(LineHeight::default());
+        let icon_shaping = icon_val
+            .get("shaping")
+            .and_then(|v| v.as_str())
+            .and_then(|s| match s.to_ascii_lowercase().as_str() {
+                "basic" => Some(iced::widget::text::Shaping::Basic),
+                "advanced" => Some(iced::widget::text::Shaping::Advanced),
+                "auto" => Some(iced::widget::text::Shaping::Auto),
+                _ => None,
+            })
+            .unwrap_or(iced::widget::text::Shaping::Auto);
+        let icon_struct = checkbox::Icon {
+            font: icon_font,
+            code_point,
+            size: icon_size,
+            line_height: icon_line_height,
+            shaping: icon_shaping,
+        };
+        cb = cb.icon(icon_struct);
     }
     // Style: string name or style map object
     if let Some(style_val) = props.and_then(|p| p.get("style")) {
@@ -652,20 +650,20 @@ pub(crate) fn render_toggler<'a>(
         t = t.font(f);
     }
     if let Some(lh) = parse_line_height(props) {
-        t = t.text_line_height(lh);
+        t = t.line_height(lh);
     }
     if let Some(shaping) = parse_shaping(props) {
-        t = t.text_shaping(shaping);
+        t = t.shaping(shaping);
     }
     if let Some(w) = parse_wrapping(props) {
-        t = t.text_wrapping(w);
+        t = t.wrapping(w);
     }
     if let Some(align) = props
         .and_then(|p| p.get("text_alignment"))
         .and_then(|v| v.as_str())
         .and_then(value_to_horizontal_alignment)
     {
-        t = t.text_alignment(align);
+        t = t.alignment(align);
     }
 
     // Style: string name or style map object
@@ -762,13 +760,13 @@ pub(crate) fn render_radio<'a>(
         r = r.font(f);
     }
     if let Some(lh) = parse_line_height(props) {
-        r = r.text_line_height(lh);
+        r = r.line_height(lh);
     }
     if let Some(shaping) = parse_shaping(props) {
-        r = r.text_shaping(shaping);
+        r = r.shaping(shaping);
     }
     if let Some(w) = parse_wrapping(props) {
-        r = r.text_wrapping(w);
+        r = r.wrapping(w);
     }
 
     // Style: string name or style map object
@@ -946,11 +944,10 @@ pub(crate) fn render_pick_list<'a>(
     let padding = parse_padding_value(props);
     let id = node.id.clone();
 
-    let mut pl = pick_list(options, selected, move |v: String| {
-        Message::Select(id.clone(), v)
-    })
-    .width(width)
-    .padding(padding);
+    let mut pl = pick_list(selected, options, |v: &String| v.clone())
+        .on_select(move |v: String| Message::Select(id.clone(), v))
+        .width(width)
+        .padding(padding);
 
     if let Some(p) = placeholder {
         pl = pl.placeholder(p);
@@ -969,10 +966,10 @@ pub(crate) fn render_pick_list<'a>(
         pl = pl.menu_height(mh);
     }
     if let Some(lh) = parse_line_height(props) {
-        pl = pl.text_line_height(lh);
+        pl = pl.line_height(lh);
     }
     if let Some(shaping) = parse_shaping(props) {
-        pl = pl.text_shaping(shaping);
+        pl = pl.shaping(shaping);
     }
 
     if let Some(handle) = parse_pick_list_handle(props) {

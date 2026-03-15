@@ -1,5 +1,5 @@
 use iced::widget::pane_grid;
-use iced::{window, Task};
+use iced::{Task, window};
 
 use julep_core::message::Message;
 
@@ -146,10 +146,10 @@ impl App {
                     _ => pane_grid::Axis::Vertical,
                 };
 
-                if let Some(state) = self.core.caches.pane_grid_state_mut(&target) {
-                    if let Some(pane) = find_pane_by_julep_id(state, &pane_id) {
-                        let _ = state.split(axis, pane, new_pane_id);
-                    }
+                if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
+                    && let Some(pane) = find_pane_by_julep_id(state, &pane_id)
+                {
+                    let _ = state.split(axis, pane, new_pane_id);
                 }
                 Task::none()
             }
@@ -161,10 +161,10 @@ impl App {
                     .unwrap_or_default()
                     .to_string();
 
-                if let Some(state) = self.core.caches.pane_grid_state_mut(&target) {
-                    if let Some(pane) = find_pane_by_julep_id(state, &pane_id) {
-                        let _ = state.close(pane);
-                    }
+                if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
+                    && let Some(pane) = find_pane_by_julep_id(state, &pane_id)
+                {
+                    let _ = state.close(pane);
                 }
                 Task::none()
             }
@@ -181,13 +181,13 @@ impl App {
                     .unwrap_or_default()
                     .to_string();
 
-                if let Some(state) = self.core.caches.pane_grid_state_mut(&target) {
-                    if let (Some(a), Some(b)) = (
+                if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
+                    && let (Some(a), Some(b)) = (
                         find_pane_by_julep_id(state, &a_id),
                         find_pane_by_julep_id(state, &b_id),
-                    ) {
-                        state.swap(a, b);
-                    }
+                    )
+                {
+                    state.swap(a, b);
                 }
                 Task::none()
             }
@@ -199,10 +199,10 @@ impl App {
                     .unwrap_or_default()
                     .to_string();
 
-                if let Some(state) = self.core.caches.pane_grid_state_mut(&target) {
-                    if let Some(pane) = find_pane_by_julep_id(state, &pane_id) {
-                        state.maximize(pane);
-                    }
+                if let Some(state) = self.core.caches.pane_grid_state_mut(&target)
+                    && let Some(pane) = find_pane_by_julep_id(state, &pane_id)
+                {
+                    state.maximize(pane);
                 }
                 Task::none()
             }

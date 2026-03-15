@@ -10,12 +10,12 @@
 
 use crate::message::Message;
 
+use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
 use iced::advanced::renderer;
 use iced::advanced::widget::operation::accessible::{self, Accessible};
 use iced::advanced::widget::{self, Widget};
-use iced::advanced::{Clipboard, Shell};
 use iced::{Element, Event, Length, Rectangle, Size, Vector};
 use serde_json::Value;
 
@@ -83,11 +83,7 @@ impl A11yOverrides {
 
         let level = a11y.get("level").and_then(|v| v.as_u64()).and_then(|n| {
             let n = n as usize;
-            if (1..=6).contains(&n) {
-                Some(n)
-            } else {
-                None
-            }
+            if (1..=6).contains(&n) { Some(n) } else { None }
         });
 
         let live = a11y
@@ -248,7 +244,6 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -258,7 +253,6 @@ impl Widget<Message, iced::Theme, iced::Renderer> for A11yOverride<'_> {
             layout,
             cursor,
             renderer,
-            clipboard,
             shell,
             viewport,
         );
@@ -366,16 +360,11 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
                 .description
                 .as_deref()
                 .or(accessible.description),
-            value: accessible.value,
-            disabled: accessible.disabled,
-            toggled: accessible.toggled,
-            selected: accessible.selected,
             expanded: self.overrides.expanded.or(accessible.expanded),
             live: self.overrides.live.or(accessible.live),
             level: self.overrides.level.or(accessible.level),
             required: self.overrides.required || accessible.required,
-            labelled_by: accessible.labelled_by,
-            described_by: accessible.described_by,
+            ..accessible.clone()
         };
         self.inner.accessible(id, bounds, &overridden);
     }

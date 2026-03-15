@@ -267,18 +267,19 @@ pub mod headless_mode {
             julep_core::widgets::render(root, &core.caches, &images, theme, dispatcher);
 
         // Create a headless tiny-skia renderer.
-        let mut renderer = match iced::futures::executor::block_on(iced::Renderer::new(
-            iced::Font::DEFAULT,
-            iced::Pixels(16.0),
-            None,
-        )) {
-            Some(r) => r,
-            None => {
-                log::error!("failed to create headless renderer");
-                crate::test_protocol::emit_wire(&ScreenshotResponseEmpty::new(id, name));
-                return;
-            }
+        let renderer_settings = iced::advanced::renderer::Settings {
+            default_font: iced::Font::DEFAULT,
+            default_text_size: iced::Pixels(16.0),
         };
+        let mut renderer =
+            match iced::futures::executor::block_on(iced::Renderer::new(renderer_settings, None)) {
+                Some(r) => r,
+                None => {
+                    log::error!("failed to create headless renderer");
+                    crate::test_protocol::emit_wire(&ScreenshotResponseEmpty::new(id, name));
+                    return;
+                }
+            };
 
         let size = iced::Size::new(width as f32, height as f32);
         let mut ui = iced_test::runtime::UserInterface::build(

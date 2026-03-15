@@ -23,14 +23,14 @@ use iced::widget::markdown;
 use iced::widget::scrollable::Anchor;
 use iced::widget::text::LineHeight;
 use iced::widget::{
-    button, checkbox, column, combo_box, container, grid, mouse_area, pane_grid, pick_list, pin,
-    progress_bar, rich_text, row, rule, scrollable, sensor, slider, span, text, text_editor,
-    text_input, toggler, tooltip, vertical_slider, Space, Stack,
+    Space, Stack, button, checkbox, column, combo_box, container, grid, mouse_area, pane_grid,
+    pick_list, pin, progress_bar, rich_text, row, rule, scrollable, sensor, slider, span, text,
+    text_editor, text_input, toggler, tooltip, vertical_slider,
 };
 #[allow(unused_imports)]
 use iced::{
-    alignment, font, keyboard, mouse, widget, Border, Color, ContentFit, Element, Fill, Font,
-    Length, Padding, Pixels, Point, Radians, Rotation, Shadow, Size, Vector,
+    Border, Color, ContentFit, Element, Fill, Font, Length, Padding, Pixels, Point, Radians,
+    Rotation, Shadow, Size, Vector, alignment, font, keyboard, mouse, widget,
 };
 use serde_json::Value;
 use std::cell::Cell;

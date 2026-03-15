@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, row, rule, scrollable, text};
-use iced::{alignment, Element, Fill, Length};
+use iced::{Element, Fill, Length, alignment};
 use serde_json::Value;
 
 use super::helpers::*;

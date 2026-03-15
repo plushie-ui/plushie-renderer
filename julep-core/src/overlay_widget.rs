@@ -6,11 +6,11 @@
 
 use crate::message::Message;
 
+use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Widget};
-use iced::advanced::{Clipboard, Shell};
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector};
 
 /// Overlay position relative to the anchor widget.
@@ -112,7 +112,6 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -122,7 +121,6 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
             layout,
             cursor,
             renderer,
-            clipboard,
             shell,
             viewport,
         );
@@ -301,7 +299,6 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
         let content_layout = layout
@@ -314,7 +311,6 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
             content_layout,
             cursor,
             renderer,
-            clipboard,
             shell,
             &Rectangle::with_size(Size::INFINITE),
         );

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use iced::widget::canvas;
-use iced::{mouse, Color, Element, Length, Pixels, Point, Radians, Size, Vector};
+use iced::{Color, Element, Length, Pixels, Point, Radians, Size, Vector, mouse};
 use serde_json::Value;
 
-use super::helpers::*;
 use super::WidgetCaches;
+use super::helpers::*;
 use crate::extensions::ExtensionDispatcher;
 use crate::message::Message;
 use crate::protocol::TreeNode;

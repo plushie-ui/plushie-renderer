@@ -2,6 +2,7 @@
 name = "julep-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -10,7 +11,7 @@ name = "julep_core"
 path = "src/lib.rs"
 
 [dependencies]
-iced = { version = "0.14", features = ["tokio", "advanced"] }
+iced = { version = "0.6", package = "julep-iced", features = ["tokio", "advanced"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rmp-serde = "1"
@@ -52,5 +53,5 @@ dialogs = ["rfd"]
 clipboard = ["arboard"]
 # OS notification support via notify-rust.
 notifications = ["notify-rust"]
-# Accessibility via accesskit. Requires the iced fork with a11y support.
+# Accessibility via accesskit.
 a11y = []

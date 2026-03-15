@@ -132,11 +132,11 @@ impl Core {
                 log::debug!("patch received ({} ops)", ops.len());
                 self.tree.apply_patch(ops);
                 // Re-check root theme prop in case a patch changed it.
-                if let Some(root) = self.tree.root() {
-                    if let Some(theme_val) = root.props.get("theme") {
-                        let theme_val = theme_val.clone();
-                        self.resolve_and_cache_theme(&theme_val, &mut effects);
-                    }
+                if let Some(root) = self.tree.root()
+                    && let Some(theme_val) = root.props.get("theme")
+                {
+                    let theme_val = theme_val.clone();
+                    self.resolve_and_cache_theme(&theme_val, &mut effects);
                 }
                 if let Some(root) = self.tree.root() {
                     widgets::ensure_caches(root, &mut self.caches);
@@ -670,7 +670,7 @@ mod tests {
 #[cfg(test)]
 mod extension_event_tests {
     use iced::{Element, Theme};
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use crate::extensions::{
         EventResult, ExtensionCaches, ExtensionDispatcher, GenerationCounter, WidgetEnv,
@@ -710,8 +710,8 @@ mod extension_event_tests {
         ) -> EventResult {
             // Mutate caches and return Consumed with no events -- the
             // scenario that was suspected of suppressing redraws.
-            if let Some(gen) = caches.get_mut::<GenerationCounter>(self.config_key(), node_id) {
-                gen.bump();
+            if let Some(counter) = caches.get_mut::<GenerationCounter>(self.config_key(), node_id) {
+                counter.bump();
             }
             EventResult::Consumed(vec![])
         }
@@ -744,8 +744,8 @@ mod extension_event_tests {
             _data: &Value,
             caches: &mut ExtensionCaches,
         ) -> EventResult {
-            if let Some(gen) = caches.get_mut::<GenerationCounter>(self.config_key(), node_id) {
-                gen.bump();
+            if let Some(counter) = caches.get_mut::<GenerationCounter>(self.config_key(), node_id) {
+                counter.bump();
             }
             EventResult::Observed(vec![OutgoingEvent::generic(
                 "viewport".to_string(),
@@ -864,16 +864,16 @@ mod extension_event_tests {
 
     #[test]
     fn generation_counter_detects_stale_state() {
-        let mut gen = GenerationCounter::new();
-        let saved = gen.get();
+        let mut counter = GenerationCounter::new();
+        let saved = counter.get();
         assert_eq!(saved, 0);
 
-        gen.bump();
-        assert_ne!(gen.get(), saved, "generation should differ after bump");
+        counter.bump();
+        assert_ne!(counter.get(), saved, "generation should differ after bump");
 
         // Simulates the pattern in canvas::Program::draw -- compare saved
         // value to current, clear cache if they differ.
-        let needs_redraw = gen.get() != saved;
+        let needs_redraw = counter.get() != saved;
         assert!(needs_redraw);
     }
 
