@@ -236,14 +236,27 @@ pub fn prop_color(node: &TreeNode, key: &str) -> Option<Color> {
 }
 
 /// Get an array of f32 values from a prop.
+/// Non-numeric elements are silently dropped with a warning.
 pub fn prop_f32_array(node: &TreeNode, key: &str) -> Option<Vec<f32>> {
     let val = props(node)?.get(key)?;
     match val.as_array() {
-        Some(arr) => Some(
-            arr.iter()
-                .filter_map(|v| v.as_f64().map(|f| f as f32))
-                .collect(),
-        ),
+        Some(arr) => {
+            let mut result = Vec::with_capacity(arr.len());
+            for (i, v) in arr.iter().enumerate() {
+                match v.as_f64() {
+                    Some(f) => result.push(f as f32),
+                    None => {
+                        log::warn!(
+                            "prop '{}': dropping non-numeric element at index {}: {:?}",
+                            key,
+                            i,
+                            v
+                        );
+                    }
+                }
+            }
+            Some(result)
+        }
         None => {
             log::trace!("prop '{}': expected array, got {:?}", key, val);
             None
@@ -333,6 +346,96 @@ fn value_to_vertical_alignment(s: &str) -> Option<alignment::Vertical> {
         "bottom" | "end" => Some(alignment::Vertical::Bottom),
         _ => None,
     }
+}
+
+/// Get an i32 prop value. Accepts both JSON numbers and numeric strings.
+pub fn prop_i32(node: &TreeNode, key: &str) -> Option<i32> {
+    let val = props(node)?.get(key)?;
+    match val {
+        Value::Number(n) => match n.as_i64().and_then(|v| i32::try_from(v).ok()) {
+            Some(i) => Some(i),
+            None => {
+                log::trace!("prop '{}': expected i32, got {:?}", key, val);
+                None
+            }
+        },
+        Value::String(s) => match s.trim().parse::<i32>() {
+            Ok(i) => Some(i),
+            Err(_) => {
+                log::trace!("prop '{}': string not parseable as i32: {:?}", key, s);
+                None
+            }
+        },
+        _ => {
+            log::trace!("prop '{}': expected i32, got {:?}", key, val);
+            None
+        }
+    }
+}
+
+/// Get an array of f64 values from a prop.
+/// Non-numeric elements are silently dropped with a warning.
+pub fn prop_f64_array(node: &TreeNode, key: &str) -> Option<Vec<f64>> {
+    let val = props(node)?.get(key)?;
+    match val.as_array() {
+        Some(arr) => {
+            let mut result = Vec::with_capacity(arr.len());
+            for (i, v) in arr.iter().enumerate() {
+                match v.as_f64() {
+                    Some(f) => result.push(f),
+                    None => {
+                        log::warn!(
+                            "prop '{}': dropping non-numeric element at index {}: {:?}",
+                            key,
+                            i,
+                            v
+                        );
+                    }
+                }
+            }
+            Some(result)
+        }
+        None => {
+            log::trace!("prop '{}': expected array, got {:?}", key, val);
+            None
+        }
+    }
+}
+
+/// Get an array of string values from a prop.
+pub fn prop_str_array(node: &TreeNode, key: &str) -> Option<Vec<String>> {
+    let val = props(node)?.get(key)?;
+    match val.as_array() {
+        Some(arr) => Some(
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect(),
+        ),
+        None => {
+            log::trace!("prop '{}': expected array, got {:?}", key, val);
+            None
+        }
+    }
+}
+
+/// Get a reference to a JSON object prop.
+pub fn prop_object<'a>(
+    node: &'a TreeNode,
+    key: &str,
+) -> Option<&'a serde_json::Map<String, Value>> {
+    let val = props(node)?.get(key)?;
+    match val.as_object() {
+        Some(obj) => Some(obj),
+        None => {
+            log::trace!("prop '{}': expected object, got {:?}", key, val);
+            None
+        }
+    }
+}
+
+/// Get a reference to a raw JSON value prop.
+pub fn prop_value<'a>(node: &'a TreeNode, key: &str) -> Option<&'a Value> {
+    props(node)?.get(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -690,5 +793,129 @@ mod tests {
         assert!(prop_str(&node, "anything").is_none());
         assert!(prop_f32(&node, "anything").is_none());
         assert!(prop_bool(&node, "anything").is_none());
+    }
+
+    // -- prop_i32 --
+
+    #[test]
+    fn test_prop_i32_positive() {
+        let node = make_node(json!({"x": 42}));
+        assert_eq!(prop_i32(&node, "x"), Some(42));
+    }
+
+    #[test]
+    fn test_prop_i32_negative() {
+        let node = make_node(json!({"x": -100}));
+        assert_eq!(prop_i32(&node, "x"), Some(-100));
+    }
+
+    #[test]
+    fn test_prop_i32_string() {
+        let node = make_node(json!({"x": "-7"}));
+        assert_eq!(prop_i32(&node, "x"), Some(-7));
+    }
+
+    #[test]
+    fn test_prop_i32_missing() {
+        let node = make_node(json!({}));
+        assert_eq!(prop_i32(&node, "x"), None);
+    }
+
+    #[test]
+    fn test_prop_i32_overflow() {
+        let node = make_node(json!({"x": 5_000_000_000i64}));
+        assert_eq!(prop_i32(&node, "x"), None);
+    }
+
+    // -- prop_f64_array --
+
+    #[test]
+    fn test_prop_f64_array() {
+        let node = make_node(json!({"data": [1.0, 2.5, 3.0]}));
+        let arr = prop_f64_array(&node, "data").unwrap();
+        assert_eq!(arr.len(), 3);
+        assert!((arr[0] - 1.0).abs() < 0.0001);
+        assert!((arr[1] - 2.5).abs() < 0.0001);
+        assert!((arr[2] - 3.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_prop_f64_array_skips_non_numeric() {
+        let node = make_node(json!({"data": [1.0, "nope", 3.0]}));
+        let arr = prop_f64_array(&node, "data").unwrap();
+        assert_eq!(arr.len(), 2);
+        assert!((arr[0] - 1.0).abs() < 0.0001);
+        assert!((arr[1] - 3.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_prop_f64_array_missing() {
+        let node = make_node(json!({}));
+        assert!(prop_f64_array(&node, "data").is_none());
+    }
+
+    // -- prop_str_array --
+
+    #[test]
+    fn test_prop_str_array() {
+        let node = make_node(json!({"tags": ["a", "b", "c"]}));
+        let arr = prop_str_array(&node, "tags").unwrap();
+        assert_eq!(arr, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_prop_str_array_skips_non_string() {
+        let node = make_node(json!({"tags": ["a", 42, "c"]}));
+        let arr = prop_str_array(&node, "tags").unwrap();
+        assert_eq!(arr, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn test_prop_str_array_missing() {
+        let node = make_node(json!({}));
+        assert!(prop_str_array(&node, "tags").is_none());
+    }
+
+    // -- prop_object --
+
+    #[test]
+    fn test_prop_object() {
+        let node = make_node(json!({"style": {"color": "red"}}));
+        let obj = prop_object(&node, "style").unwrap();
+        assert_eq!(obj.get("color").and_then(|v| v.as_str()), Some("red"));
+    }
+
+    #[test]
+    fn test_prop_object_missing() {
+        let node = make_node(json!({}));
+        assert!(prop_object(&node, "style").is_none());
+    }
+
+    #[test]
+    fn test_prop_object_wrong_type() {
+        let node = make_node(json!({"style": "not an object"}));
+        assert!(prop_object(&node, "style").is_none());
+    }
+
+    // -- prop_value --
+
+    #[test]
+    fn test_prop_value_string() {
+        let node = make_node(json!({"x": "hello"}));
+        let v = prop_value(&node, "x").unwrap();
+        assert_eq!(v.as_str(), Some("hello"));
+    }
+
+    #[test]
+    fn test_prop_value_number() {
+        let node = make_node(json!({"x": 42}));
+        let v = prop_value(&node, "x").unwrap();
+        assert_eq!(v.as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_prop_value_missing() {
+        let node = make_node(json!({}));
+        assert!(prop_value(&node, "x").is_none());
     }
 }

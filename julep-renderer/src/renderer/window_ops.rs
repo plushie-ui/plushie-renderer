@@ -1,0 +1,959 @@
+use std::collections::HashSet;
+
+use base64::Engine as _;
+use iced::{window, Point, Size, Task};
+
+use julep_core::message::Message;
+
+use super::emitters::{emit_effect_response, emit_query_response};
+use super::App;
+
+// ---------------------------------------------------------------------------
+// Window operations (impl App)
+// ---------------------------------------------------------------------------
+
+impl App {
+    pub(super) fn handle_window_op(
+        &mut self,
+        op: &str,
+        window_id: &str,
+        settings: &serde_json::Value,
+    ) -> Task<Message> {
+        match op {
+            "open" => {
+                if self.window_map.contains_key(window_id) {
+                    log::warn!("window_op open: {window_id} already open, skipping");
+                    return Task::none();
+                }
+
+                let win_settings = parse_window_settings(settings);
+                let (iced_id, open_task) = window::open(win_settings);
+
+                self.window_map.insert(window_id.to_string(), iced_id);
+                self.reverse_window_map
+                    .insert(iced_id, window_id.to_string());
+
+                let julep_id = window_id.to_string();
+                open_task.map(move |id| Message::WindowOpened(id, julep_id.clone()))
+            }
+            "close" => {
+                if let Some(iced_id) = self.window_map.remove(window_id) {
+                    self.reverse_window_map.remove(&iced_id);
+                    window::close(iced_id)
+                } else {
+                    log::warn!("window_op close: unknown window_id: {window_id}");
+                    Task::none()
+                }
+            }
+            "update" => {
+                // Apply changed window props to an already-open window.
+                // The host sends this when a surviving window's props change
+                // between renders.
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let mut tasks: Vec<Task<Message>> = Vec::new();
+
+                    if let Some(obj) = settings.as_object() {
+                        if let Some(title) = obj.get("title").and_then(|v| v.as_str()) {
+                            log::debug!("update window {window_id}: title={title}");
+                            // Title is read from the tree in title(), no task needed.
+                            let _ = title;
+                        }
+                        if obj.contains_key("width") || obj.contains_key("height") {
+                            let w =
+                                obj.get("width").and_then(|v| v.as_f64()).unwrap_or(800.0) as f32;
+                            let h =
+                                obj.get("height").and_then(|v| v.as_f64()).unwrap_or(600.0) as f32;
+                            tasks.push(window::resize(iced_id, Size::new(w, h)));
+                        }
+                        if let Some(maximized) = obj.get("maximized").and_then(|v| v.as_bool()) {
+                            tasks.push(window::maximize(iced_id, maximized));
+                        }
+                        if let Some(resizable) = obj.get("resizable").and_then(|v| v.as_bool()) {
+                            tasks.push(window::set_resizable(iced_id, resizable));
+                        }
+                        if let Some(visible) = obj.get("visible").and_then(|v| v.as_bool()) {
+                            let mode = if visible {
+                                window::Mode::Windowed
+                            } else {
+                                window::Mode::Hidden
+                            };
+                            tasks.push(window::set_mode(iced_id, mode));
+                        }
+                        if let Some(fullscreen) = obj.get("fullscreen").and_then(|v| v.as_bool()) {
+                            let mode = if fullscreen {
+                                window::Mode::Fullscreen
+                            } else {
+                                window::Mode::Windowed
+                            };
+                            tasks.push(window::set_mode(iced_id, mode));
+                        }
+                        if obj.contains_key("min_size") {
+                            let sz = parse_optional_size(
+                                obj.get("min_size").unwrap_or(&serde_json::Value::Null),
+                            );
+                            tasks.push(window::set_min_size(iced_id, sz));
+                        }
+                        if obj.contains_key("max_size") {
+                            let sz = parse_optional_size(
+                                obj.get("max_size").unwrap_or(&serde_json::Value::Null),
+                            );
+                            tasks.push(window::set_max_size(iced_id, sz));
+                        }
+                        if obj.contains_key("level") {
+                            let level = parse_window_level(
+                                obj.get("level")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("normal"),
+                            );
+                            tasks.push(window::set_level(iced_id, level));
+                        }
+                        if obj.contains_key("decorations") {
+                            // WARNING: iced only exposes toggle_decorations(), not set_decorations().
+                            // This means sending decorations=true when already true will turn them OFF.
+                            // Callers must track their own state and only send when they want to change.
+                            tasks.push(window::toggle_decorations(iced_id));
+                        }
+                    }
+
+                    Task::batch(tasks)
+                } else {
+                    log::warn!("window_op update: unknown window_id: {window_id}");
+                    Task::none()
+                }
+            }
+            "resize" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let w = settings
+                        .get("width")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(800.0) as f32;
+                    let h = settings
+                        .get("height")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(600.0) as f32;
+                    window::resize(iced_id, Size::new(w, h))
+                } else {
+                    Task::none()
+                }
+            }
+            "move" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let x = settings.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let y = settings.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    window::move_to(iced_id, Point::new(x, y))
+                } else {
+                    Task::none()
+                }
+            }
+            "maximize" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let maximized = settings
+                        .get("maximized")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    window::maximize(iced_id, maximized)
+                } else {
+                    Task::none()
+                }
+            }
+            "minimize" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let minimized = settings
+                        .get("minimized")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    window::minimize(iced_id, minimized)
+                } else {
+                    Task::none()
+                }
+            }
+            "set_mode" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let mode = parse_window_mode(settings);
+                    window::set_mode(iced_id, mode)
+                } else {
+                    Task::none()
+                }
+            }
+            "toggle_maximize" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    window::toggle_maximize(iced_id)
+                } else {
+                    Task::none()
+                }
+            }
+            "toggle_decorations" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    window::toggle_decorations(iced_id)
+                } else {
+                    Task::none()
+                }
+            }
+            "gain_focus" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    window::gain_focus(iced_id)
+                } else {
+                    Task::none()
+                }
+            }
+            "set_level" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let level = parse_window_level(
+                        settings
+                            .get("level")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("normal"),
+                    );
+                    window::set_level(iced_id, level)
+                } else {
+                    Task::none()
+                }
+            }
+            "drag" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    window::drag(iced_id)
+                } else {
+                    Task::none()
+                }
+            }
+            "drag_resize" => {
+                #[cfg(target_os = "macos")]
+                log::warn!("drag_resize is not supported on macOS");
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let direction = parse_direction(
+                        settings
+                            .get("direction")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("south_east"),
+                    );
+                    window::drag_resize(iced_id, direction)
+                } else {
+                    Task::none()
+                }
+            }
+            "request_attention" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let urgency =
+                        settings
+                            .get("urgency")
+                            .and_then(|v| v.as_str())
+                            .map(|s| match s {
+                                "critical" => window::UserAttention::Critical,
+                                _ => window::UserAttention::Informational,
+                            });
+                    window::request_user_attention(iced_id, urgency)
+                } else {
+                    Task::none()
+                }
+            }
+            "show_system_menu" => {
+                #[cfg(not(target_os = "windows"))]
+                log::warn!("show_system_menu is only supported on Windows");
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    window::show_system_menu(iced_id)
+                } else {
+                    Task::none()
+                }
+            }
+            "set_resizable" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let resizable = settings
+                        .get("resizable")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    window::set_resizable(iced_id, resizable)
+                } else {
+                    Task::none()
+                }
+            }
+            "set_min_size" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let size = parse_optional_size(settings);
+                    window::set_min_size(iced_id, size)
+                } else {
+                    Task::none()
+                }
+            }
+            "set_max_size" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let size = parse_optional_size(settings);
+                    window::set_max_size(iced_id, size)
+                } else {
+                    Task::none()
+                }
+            }
+            "mouse_passthrough" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let enabled = settings
+                        .get("enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    if enabled {
+                        window::enable_mouse_passthrough(iced_id)
+                    } else {
+                        window::disable_mouse_passthrough(iced_id)
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            // -- Query operations: return results as effect_response --
+            "get_size" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::size(iced_id).map(move |size| {
+                        let mut data = serde_json::json!({
+                            "width": size.width,
+                            "height": size.height,
+                            "op": "get_size",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            "get_position" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::position(iced_id).map(move |pos| {
+                        let mut data = match pos {
+                            Some(p) => {
+                                serde_json::json!({"x": p.x, "y": p.y, "op": "get_position"})
+                            }
+                            None => serde_json::json!({"op": "get_position"}),
+                        };
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            "get_mode" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::mode(iced_id).map(move |mode| {
+                        let mode_str = match mode {
+                            window::Mode::Windowed => "windowed",
+                            window::Mode::Fullscreen => "fullscreen",
+                            window::Mode::Hidden => "hidden",
+                        };
+                        let mut data = serde_json::json!({
+                            "mode": mode_str,
+                            "op": "get_mode",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            "get_scale_factor" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::scale_factor(iced_id).map(move |factor| {
+                        let mut data = serde_json::json!({
+                            "scale_factor": factor,
+                            "op": "get_scale_factor",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            "is_maximized" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::is_maximized(iced_id).map(move |val| {
+                        let mut data = serde_json::json!({
+                            "maximized": val,
+                            "op": "is_maximized",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            "is_minimized" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::is_minimized(iced_id).map(move |val| {
+                        let mut data = serde_json::json!({
+                            "minimized": val,
+                            "op": "is_minimized",
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            "screenshot" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::screenshot(iced_id).map(move |screenshot| {
+                        #[cfg(feature = "test-mode")]
+                        let rgba_b64 = {
+                            Some(base64::engine::general_purpose::STANDARD.encode(&screenshot.rgba))
+                        };
+                        #[cfg(not(feature = "test-mode"))]
+                        let rgba_b64: Option<String> = None;
+
+                        let mut data = serde_json::json!({
+                            "width": screenshot.size.width,
+                            "height": screenshot.size.height,
+                            "bytes_len": screenshot.rgba.len(),
+                            "op": "screenshot",
+                        });
+                        if let Some(b64) = rgba_b64 {
+                            data["rgba"] = serde_json::json!(b64);
+                        }
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            // Icon size recommendations:
+            // - Windows: 32x32 or 64x64 RGBA (smaller icons are upscaled)
+            // - macOS: 512x512 or 1024x1024 (macOS uses larger icons)
+            // - Linux: 32x32 or 48x48 (depends on WM/DE)
+            // All platforms: square, power-of-two dimensions recommended.
+            "set_icon" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let icon_data_b64 = settings
+                        .get("icon_data")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let width = settings.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let height =
+                        settings.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+
+                    const MAX_ICON_DIMENSION: u32 = 1024;
+
+                    if width == 0 || height == 0 {
+                        log::error!("set_icon: zero dimension ({}x{})", width, height);
+                        return Task::none();
+                    }
+                    if width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
+                        log::error!(
+                            "set_icon: dimensions {}x{} exceed maximum {}",
+                            width,
+                            height,
+                            MAX_ICON_DIMENSION
+                        );
+                        return Task::none();
+                    }
+                    if width != height {
+                        log::warn!(
+                            "set_icon: non-square icon ({}x{}); some platforms may render poorly",
+                            width,
+                            height
+                        );
+                    }
+
+                    match base64::engine::general_purpose::STANDARD.decode(icon_data_b64) {
+                        Ok(rgba) => {
+                            let expected_len = match (width as usize)
+                                .checked_mul(height as usize)
+                                .and_then(|v| v.checked_mul(4))
+                            {
+                                Some(len) => len,
+                                None => {
+                                    log::error!(
+                                        "set_icon: dimensions {}x{} would overflow",
+                                        width,
+                                        height
+                                    );
+                                    return Task::none();
+                                }
+                            };
+                            if rgba.len() != expected_len {
+                                log::error!(
+                                    "set_icon: expected {} bytes ({}x{}x4), got {}",
+                                    expected_len,
+                                    width,
+                                    height,
+                                    rgba.len()
+                                );
+                                return Task::none();
+                            }
+                            match window::icon::from_rgba(rgba, width, height) {
+                                Ok(icon) => window::set_icon(iced_id, icon),
+                                Err(e) => {
+                                    log::error!("set_icon: icon creation failed: {e}");
+                                    Task::none()
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("set_icon: base64 decode failed: {e}");
+                            Task::none()
+                        }
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            "raw_id" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::raw_id::<Message>(iced_id).map(move |raw| {
+                        let mut data = serde_json::json!({
+                            "raw_id": raw,
+                            "op": "raw_id",
+                            "platform": std::env::consts::OS,
+                        });
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            // Returns logical dimensions (physical pixels / scale_factor).
+            // On HiDPI displays, these are smaller than the actual pixel count.
+            "monitor_size" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let wid = window_id.to_string();
+                    let req_id = settings.get("request_id").cloned();
+                    window::monitor_size(iced_id).map(move |size_opt| {
+                        let mut data = match size_opt {
+                            Some(size) => serde_json::json!({
+                                "width": size.width,
+                                "height": size.height,
+                                "op": "monitor_size",
+                            }),
+                            None => serde_json::json!({"op": "monitor_size"}),
+                        };
+                        if let Some(rid) = &req_id {
+                            data["request_id"] = rid.clone();
+                        }
+                        let resp = julep_core::protocol::EffectResponse::ok(wid.clone(), data);
+                        emit_effect_response(resp);
+                        Message::NoOp
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            // -- System queries: not window-specific, use tag from settings --
+            "get_system_theme" => {
+                let tag = settings
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("system_theme")
+                    .to_string();
+                iced::system::theme().map(move |mode| {
+                    let mode_str = match mode {
+                        iced::theme::Mode::Light => "light",
+                        iced::theme::Mode::Dark => "dark",
+                        iced::theme::Mode::None => "none",
+                    };
+                    emit_query_response("system_theme", &tag, serde_json::json!(mode_str));
+                    Message::NoOp
+                })
+            }
+            #[cfg(feature = "widget-sysinfo")]
+            "get_system_info" => {
+                let tag = settings
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("system_info")
+                    .to_string();
+                iced::system::information().map(move |info| {
+                    let data = serde_json::json!({
+                        "system_name": info.system_name,
+                        "system_kernel": info.system_kernel,
+                        "system_version": info.system_version,
+                        "system_short_version": info.system_short_version,
+                        "cpu_brand": info.cpu_brand,
+                        "cpu_cores": info.cpu_cores,
+                        "memory_total": info.memory_total,
+                        "memory_used": info.memory_used,
+                        "graphics_backend": info.graphics_backend,
+                        "graphics_adapter": info.graphics_adapter,
+                    });
+                    emit_query_response("system_info", &tag, data);
+                    Message::NoOp
+                })
+            }
+            #[cfg(not(feature = "widget-sysinfo"))]
+            "get_system_info" => {
+                log::warn!("get_system_info requires the 'widget-sysinfo' feature");
+                Task::none()
+            }
+            "set_resize_increments" => {
+                if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let w = settings
+                        .get("width")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let h = settings
+                        .get("height")
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as f32);
+                    let increments = match (w, h) {
+                        (Some(w), Some(h)) => Some(Size::new(w, h)),
+                        _ => None,
+                    };
+                    window::set_resize_increments(iced_id, increments)
+                } else {
+                    Task::none()
+                }
+            }
+            "allow_automatic_tabbing" => {
+                let enabled = settings
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                window::allow_automatic_tabbing(enabled)
+            }
+            other => {
+                log::warn!("unknown window_op: {other}");
+                Task::none()
+            }
+        }
+    }
+
+    /// Compare the set of window nodes in the tree against the currently open
+    /// windows and open/close as needed.
+    pub(super) fn sync_windows(&mut self) -> Task<Message> {
+        let tree_windows: HashSet<String> = self.core.tree.window_ids().into_iter().collect();
+        let open_windows: HashSet<String> = self.window_map.keys().cloned().collect();
+
+        let mut tasks = Vec::new();
+
+        // Open windows that exist in the tree but are not yet open.
+        for win_id in &tree_windows {
+            if !open_windows.contains(win_id) {
+                let settings = self.window_settings_for(win_id);
+                let (iced_id, open_task) = window::open(settings);
+                self.window_map.insert(win_id.clone(), iced_id);
+                self.reverse_window_map.insert(iced_id, win_id.clone());
+
+                let julep_id = win_id.clone();
+                tasks.push(open_task.map(move |id| Message::WindowOpened(id, julep_id.clone())));
+            }
+        }
+
+        // Close windows that are open but no longer in the tree.
+        for win_id in &open_windows {
+            if !tree_windows.contains(win_id) {
+                if let Some(iced_id) = self.window_map.remove(win_id) {
+                    self.reverse_window_map.remove(&iced_id);
+                    tasks.push(window::close(iced_id));
+                }
+            }
+        }
+
+        Task::batch(tasks)
+    }
+
+    /// Build window::Settings from a window node's props.
+    pub(super) fn window_settings_for(&self, julep_id: &str) -> window::Settings {
+        if let Some(node) = self.core.tree.find_window(julep_id) {
+            parse_window_settings(&node.props)
+        } else {
+            window::Settings {
+                size: Size::new(800.0, 600.0),
+                ..window::Settings::default()
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Settings / enum parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a full `window::Settings` from a JSON value (node props or op settings).
+pub(super) fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
+    let width = v.get("width").and_then(|v| v.as_f64()).unwrap_or(800.0) as f32;
+    let height = v.get("height").and_then(|v| v.as_f64()).unwrap_or(600.0) as f32;
+
+    let maximized = v
+        .get("maximized")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let fullscreen = v
+        .get("fullscreen")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let visible = v.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
+    let resizable = v.get("resizable").and_then(|v| v.as_bool()).unwrap_or(true);
+    let closeable = v.get("closeable").and_then(|v| v.as_bool()).unwrap_or(true);
+    let minimizable = v
+        .get("minimizable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let decorations = v
+        .get("decorations")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let transparent = v
+        .get("transparent")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let blur = v.get("blur").and_then(|v| v.as_bool()).unwrap_or(false);
+    let exit_on_close_request = v
+        .get("exit_on_close_request")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let position = match v.get("position") {
+        Some(serde_json::Value::String(s)) if s == "centered" => window::Position::Centered,
+        Some(obj) if obj.is_object() => {
+            let x = obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            window::Position::Specific(Point::new(x, y))
+        }
+        _ => window::Position::default(),
+    };
+
+    let min_size = parse_optional_size(v.get("min_size").unwrap_or(&serde_json::Value::Null));
+    let max_size = parse_optional_size(v.get("max_size").unwrap_or(&serde_json::Value::Null));
+
+    let level = parse_window_level(v.get("level").and_then(|v| v.as_str()).unwrap_or("normal"));
+
+    window::Settings {
+        size: Size::new(width, height),
+        maximized,
+        fullscreen,
+        position,
+        min_size,
+        max_size,
+        visible,
+        resizable,
+        closeable,
+        minimizable,
+        decorations,
+        transparent,
+        blur,
+        level,
+        exit_on_close_request,
+        ..window::Settings::default()
+    }
+}
+
+fn parse_optional_size(v: &serde_json::Value) -> Option<Size> {
+    if v.is_null() || !v.is_object() {
+        // Also accept from the parent settings object directly for set_min_size/set_max_size ops
+        let w = v.get("width").and_then(|v| v.as_f64());
+        let h = v.get("height").and_then(|v| v.as_f64());
+        match (w, h) {
+            (Some(w), Some(h)) => Some(Size::new(w as f32, h as f32)),
+            _ => None,
+        }
+    } else {
+        let w = v.get("width").and_then(|v| v.as_f64());
+        let h = v.get("height").and_then(|v| v.as_f64());
+        match (w, h) {
+            (Some(w), Some(h)) => Some(Size::new(w as f32, h as f32)),
+            _ => None,
+        }
+    }
+}
+
+fn parse_window_level(s: &str) -> window::Level {
+    match s {
+        "always_on_top" => window::Level::AlwaysOnTop,
+        "always_on_bottom" => window::Level::AlwaysOnBottom,
+        _ => window::Level::Normal,
+    }
+}
+
+fn parse_window_mode(v: &serde_json::Value) -> window::Mode {
+    match v.get("mode").and_then(|v| v.as_str()).unwrap_or("windowed") {
+        "fullscreen" => window::Mode::Fullscreen,
+        "hidden" => window::Mode::Hidden,
+        _ => window::Mode::Windowed,
+    }
+}
+
+fn parse_direction(s: &str) -> window::Direction {
+    match s {
+        "north" => window::Direction::North,
+        "south" => window::Direction::South,
+        "east" => window::Direction::East,
+        "west" => window::Direction::West,
+        "north_east" => window::Direction::NorthEast,
+        "north_west" => window::Direction::NorthWest,
+        "south_east" => window::Direction::SouthEast,
+        "south_west" => window::Direction::SouthWest,
+        _ => window::Direction::SouthEast,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_window_settings_defaults() {
+        let settings = parse_window_settings(&json!({}));
+        assert_eq!(settings.size, Size::new(800.0, 600.0));
+        assert!(settings.visible);
+        assert!(settings.resizable);
+        assert!(settings.decorations);
+        assert!(!settings.maximized);
+        assert!(!settings.fullscreen);
+        assert!(!settings.transparent);
+    }
+
+    #[test]
+    fn parse_window_settings_custom_size() {
+        let settings = parse_window_settings(&json!({"width": 1024, "height": 768}));
+        assert_eq!(settings.size, Size::new(1024.0, 768.0));
+    }
+
+    #[test]
+    fn parse_window_settings_centered_position() {
+        let settings = parse_window_settings(&json!({"position": "centered"}));
+        assert!(matches!(settings.position, window::Position::Centered));
+    }
+
+    #[test]
+    fn parse_window_settings_specific_position() {
+        let settings = parse_window_settings(&json!({"position": {"x": 100, "y": 200}}));
+        match settings.position {
+            window::Position::Specific(p) => {
+                assert_eq!(p.x, 100.0);
+                assert_eq!(p.y, 200.0);
+            }
+            _ => panic!("expected Specific position"),
+        }
+    }
+
+    #[test]
+    fn parse_window_settings_boolean_flags() {
+        let settings = parse_window_settings(&json!({
+            "maximized": true,
+            "transparent": true,
+            "decorations": false,
+            "resizable": false,
+        }));
+        assert!(settings.maximized);
+        assert!(settings.transparent);
+        assert!(!settings.decorations);
+        assert!(!settings.resizable);
+    }
+
+    #[test]
+    fn parse_optional_size_from_object() {
+        let sz = parse_optional_size(&json!({"width": 100, "height": 200}));
+        assert_eq!(sz, Some(Size::new(100.0, 200.0)));
+    }
+
+    #[test]
+    fn parse_optional_size_null() {
+        let sz = parse_optional_size(&json!(null));
+        assert_eq!(sz, None);
+    }
+
+    #[test]
+    fn parse_window_level_variants() {
+        assert!(matches!(
+            parse_window_level("always_on_top"),
+            window::Level::AlwaysOnTop
+        ));
+        assert!(matches!(
+            parse_window_level("always_on_bottom"),
+            window::Level::AlwaysOnBottom
+        ));
+        assert!(matches!(
+            parse_window_level("normal"),
+            window::Level::Normal
+        ));
+        assert!(matches!(
+            parse_window_level("unknown"),
+            window::Level::Normal
+        ));
+    }
+
+    #[test]
+    fn parse_window_mode_variants() {
+        assert!(matches!(
+            parse_window_mode(&json!({"mode": "fullscreen"})),
+            window::Mode::Fullscreen
+        ));
+        assert!(matches!(
+            parse_window_mode(&json!({"mode": "hidden"})),
+            window::Mode::Hidden
+        ));
+        assert!(matches!(
+            parse_window_mode(&json!({"mode": "windowed"})),
+            window::Mode::Windowed
+        ));
+        assert!(matches!(
+            parse_window_mode(&json!({})),
+            window::Mode::Windowed
+        ));
+    }
+
+    #[test]
+    fn parse_direction_variants() {
+        assert!(matches!(
+            parse_direction("north"),
+            window::Direction::North
+        ));
+        assert!(matches!(
+            parse_direction("south_west"),
+            window::Direction::SouthWest
+        ));
+        assert!(matches!(
+            parse_direction("invalid"),
+            window::Direction::SouthEast
+        ));
+    }
+}

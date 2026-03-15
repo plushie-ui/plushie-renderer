@@ -55,7 +55,13 @@ impl Tree {
             .collect()
     }
 
-    /// Apply a list of patch operations to the current tree.
+    /// Apply a sequence of patch operations to the tree.
+    ///
+    /// Operations are applied sequentially. If one operation fails, it is
+    /// skipped with a warning and subsequent operations are still applied.
+    /// This means a partial failure can leave the tree in an intermediate
+    /// state. The host should treat patch sequences as best-effort and
+    /// use Snapshot for full-state recovery when needed.
     pub fn apply_patch(&mut self, ops: Vec<PatchOp>) {
         for op in ops {
             if let Err(e) = self.apply_op(&op) {
@@ -128,7 +134,10 @@ impl Tree {
                 if index <= parent.children.len() {
                     parent.children.insert(index, new_node);
                 } else {
-                    // Append if index is beyond current length
+                    log::warn!(
+                        "insert_child: index {index} is beyond children length {}, appending instead",
+                        parent.children.len()
+                    );
                     parent.children.push(new_node);
                 }
                 Ok(())

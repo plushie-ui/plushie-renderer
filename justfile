@@ -45,6 +45,26 @@ build-headless:
 build-test-mode:
     cargo build --features test-mode
 
+build-no-a11y:
+    cargo build --no-default-features --features builtin-all,dialogs,clipboard,notifications
+
+# === Test Variants ===
+
+test-features:
+    cargo nextest run --workspace --features headless
+    cargo nextest run --workspace --features test-mode
+
+coverage:
+    #!/usr/bin/env bash
+    if command -v cargo-llvm-cov &>/dev/null; then
+        cargo llvm-cov --workspace --html
+    elif command -v cargo-tarpaulin &>/dev/null; then
+        cargo tarpaulin --workspace --out html
+    else
+        echo "Install cargo-llvm-cov or cargo-tarpaulin for coverage." >&2
+        exit 1
+    fi
+
 # === Development Helpers ===
 
 format:

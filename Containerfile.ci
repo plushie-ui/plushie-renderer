@@ -1,10 +1,24 @@
 # CI container for julep-renderer
 # Build: podman build -t julep-renderer-ci:latest -f Containerfile.ci .
 
+# node:18-bookworm provides Node.js (needed by the host-side test harness)
+# on a Debian Bookworm base, giving us a stable apt package set for native
+# build dependencies.
 FROM node:18-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# build-essential       -- C compiler and linker for native crate builds
+# git                   -- VCS; cargo fetches git dependencies
+# curl                  -- used by rustup installer
+# ca-certificates       -- TLS root certs for HTTPS fetches
+# pkg-config            -- locates system libraries for native crate builds
+# cmake                 -- build system required by some native deps (e.g. cmake-based C libs)
+# libxkbcommon-dev      -- keyboard handling (XKB), runtime dep of iced_winit
+# libwayland-dev        -- Wayland display protocol headers
+# libx11-dev            -- X11 display protocol headers
+# libfontconfig1-dev    -- font discovery and configuration
+# libfreetype-dev       -- font rasterization (FreeType)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \

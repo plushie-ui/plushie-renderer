@@ -33,6 +33,9 @@ impl Codec {
     ///
     /// - JSON: `serde_json` serialization + trailing `\n`.
     /// - MsgPack: 4-byte BE u32 length prefix + `rmp_serde` named serialization.
+    ///
+    /// Allocates a new Vec per call. For hot paths (e.g. rapid event
+    /// emission), consider pre-allocating and reusing a buffer.
     pub fn encode<T: Serialize>(&self, value: &T) -> Result<Vec<u8>, String> {
         match self {
             Codec::Json => {

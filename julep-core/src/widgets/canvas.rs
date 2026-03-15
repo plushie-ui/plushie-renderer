@@ -10,6 +10,11 @@ use crate::extensions::ExtensionDispatcher;
 use crate::message::Message;
 use crate::protocol::TreeNode;
 
+/// Maximum number of shapes per canvas layer. Layers exceeding this limit
+/// are truncated with a warning to prevent excessive tessellation work from
+/// a single oversized payload.
+const MAX_SHAPES_PER_LAYER: usize = 10_000;
+
 /// Extract sorted layer data directly from canvas props as cloned `Value`s.
 ///
 /// This avoids the serialize-then-deserialize round trip that
@@ -19,6 +24,17 @@ use crate::protocol::TreeNode;
 fn canvas_layers_from_props(
     props: Option<&serde_json::Map<String, Value>>,
 ) -> Vec<(String, Vec<Value>)> {
+    fn truncate_shapes(name: &str, mut shapes: Vec<Value>) -> Vec<Value> {
+        if shapes.len() > MAX_SHAPES_PER_LAYER {
+            log::warn!(
+                "canvas layer `{name}` has {} shapes, truncating to {MAX_SHAPES_PER_LAYER}",
+                shapes.len(),
+            );
+            shapes.truncate(MAX_SHAPES_PER_LAYER);
+        }
+        shapes
+    }
+
     if let Some(layers_obj) = props
         .and_then(|p| p.get("layers"))
         .and_then(|v| v.as_object())
@@ -27,7 +43,7 @@ fn canvas_layers_from_props(
             .iter()
             .map(|(name, shapes_val)| {
                 let shapes = shapes_val.as_array().cloned().unwrap_or_default();
-                (name.clone(), shapes)
+                (name.clone(), truncate_shapes(name, shapes))
             })
             .collect();
         layers.sort_by(|a, b| a.0.cmp(&b.0));
@@ -36,7 +52,10 @@ fn canvas_layers_from_props(
         .and_then(|p| p.get("shapes"))
         .and_then(|v| v.as_array())
     {
-        vec![("default".to_string(), shapes_arr.clone())]
+        vec![(
+            "default".to_string(),
+            truncate_shapes("default", shapes_arr.clone()),
+        )]
     } else {
         Vec::new()
     }

@@ -196,6 +196,20 @@ impl Core {
                     log::error!("no protocol_version in Settings, assuming compatible");
                 }
 
+                // Warn about startup-only fields that cannot be changed after
+                // the iced daemon has already started. These are consumed by
+                // the renderer at launch and subsequent values are silently
+                // ignored by the runtime.
+                for field in &["antialiasing", "vsync", "fonts", "scale_factor"] {
+                    if settings.get(*field).is_some() {
+                        log::debug!(
+                            "Settings field `{field}` is startup-only and \
+                             cannot be changed after the daemon has started; \
+                             this value will be ignored"
+                        );
+                    }
+                }
+
                 self.default_text_size = settings
                     .get("default_text_size")
                     .and_then(|v| v.as_f64())
@@ -233,8 +247,32 @@ impl Core {
                     height,
                 });
             }
-            _ => {
-                log::warn!("unhandled message type in core");
+            // Variants handled by the renderer binary (headless / test_mode),
+            // not by Core. Listed explicitly so adding a new IncomingMessage
+            // variant produces a compile error here instead of silently falling
+            // through a catch-all `_` arm.
+            IncomingMessage::Query { .. } => {
+                log::debug!("Query message ignored by Core (handled by headless/test_mode)");
+            }
+            IncomingMessage::Interact { .. } => {
+                log::debug!("Interact message ignored by Core (handled by test_mode)");
+            }
+            IncomingMessage::SnapshotCapture { .. } => {
+                log::debug!("SnapshotCapture message ignored by Core (handled by test_mode)");
+            }
+            IncomingMessage::ScreenshotCapture { .. } => {
+                log::debug!("ScreenshotCapture message ignored by Core (handled by test_mode)");
+            }
+            IncomingMessage::Reset { .. } => {
+                log::debug!("Reset message ignored by Core (handled by test_mode)");
+            }
+            IncomingMessage::ExtensionCommand { .. } => {
+                log::debug!("ExtensionCommand message ignored by Core (handled by renderer App)");
+            }
+            IncomingMessage::ExtensionCommandBatch { .. } => {
+                log::debug!(
+                    "ExtensionCommandBatch message ignored by Core (handled by renderer App)"
+                );
             }
         }
 
@@ -769,7 +807,7 @@ mod extension_event_tests {
         dispatcher.prepare_all(&root, &mut caches, &Theme::Dark);
 
         for _ in 0..5 {
-            dispatcher.handle_event("cw-1", "click", &Value::Null, &mut caches);
+            let _ = dispatcher.handle_event("cw-1", "click", &Value::Null, &mut caches);
         }
 
         assert_eq!(

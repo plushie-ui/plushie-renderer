@@ -34,12 +34,17 @@ widget-svg = ["iced/svg"]
 # Canvas widget -- 2D drawing surface (iced/canvas).
 widget-canvas = ["iced/canvas"]
 # Markdown widget (iced/markdown).
+# Implicitly pulls in iced's built-in markdown parser and its transitive deps.
 widget-markdown = ["iced/markdown"]
 # TextEditor syntax highlighting (iced/highlighter).
+# Implicitly enables syntect-based highlighting inside iced.
 widget-highlighter = ["iced/highlighter"]
 # System info query (iced/sysinfo).
+# Implicitly enables the sysinfo crate inside iced for CPU/memory/OS queries.
 widget-sysinfo = ["iced/sysinfo"]
-# QR code widget (iced/canvas + qrcode crate).
+# QR code widget.
+# Implicitly depends on widget-canvas: enables iced/canvas for rendering
+# the QR grid, plus the standalone qrcode crate for encoding.
 widget-qr-code = ["iced/canvas", "dep:qrcode"]
 # File dialog support via rfd.
 dialogs = ["rfd"]

@@ -1,3 +1,9 @@
+//! Platform effect handlers (file dialogs, clipboard, notifications).
+//!
+//! **File paths:** All file path strings returned by dialog handlers use
+//! OS-native path separators (`/` on Unix, `\` on Windows). Cross-platform
+//! consumers should normalize paths before comparing or storing them.
+
 use serde_json::{json, Value};
 
 use crate::protocol::EffectResponse;
@@ -37,9 +43,22 @@ pub fn handle_effect(id: String, kind: &str, payload: &Value) -> EffectResponse 
 }
 
 // ---------------------------------------------------------------------------
-// File dialogs (requires "dialogs" feature / rfd crate)
+// File dialogs -- synchronous handlers (requires "dialogs" feature / rfd crate)
+//
+// These sync handlers are used by `handle_effect()`, which is the fallback
+// path when the async runtime isn't available (e.g. during initialization or
+// in contexts where tokio isn't running). They are NOT dead code -- the async
+// counterparts in `handle_async_effect()` below use `rfd::AsyncFileDialog`
+// and are used by the renderer's `SpawnAsyncEffect` path (via Task::perform).
+// Both paths coexist intentionally: sync for headless/blocking contexts,
+// async for the normal iced daemon event loop.
 // ---------------------------------------------------------------------------
 
+/// Synchronous file open dialog. Used when the async runtime is unavailable.
+///
+/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
+/// thread because macOS requires native dialogs to run on the main thread.
+/// Prefer `handle_async_effect` when a tokio runtime is available.
 #[cfg(feature = "dialogs")]
 fn handle_file_open(id: String, payload: &Value) -> EffectResponse {
     let title = payload
@@ -80,6 +99,11 @@ fn handle_file_open(id: String, _payload: &Value) -> EffectResponse {
     EffectResponse::unsupported(id)
 }
 
+/// Synchronous file save dialog. Used when the async runtime is unavailable.
+///
+/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
+/// thread because macOS requires native dialogs to run on the main thread.
+/// Prefer `handle_async_effect` when a tokio runtime is available.
 #[cfg(feature = "dialogs")]
 fn handle_file_save(id: String, payload: &Value) -> EffectResponse {
     let title = payload
@@ -120,6 +144,11 @@ fn handle_file_save(id: String, _payload: &Value) -> EffectResponse {
     EffectResponse::unsupported(id)
 }
 
+/// Synchronous directory select dialog. Used when the async runtime is unavailable.
+///
+/// **WARNING (macOS):** Sync file dialogs may deadlock if called on the main
+/// thread because macOS requires native dialogs to run on the main thread.
+/// Prefer `handle_async_effect` when a tokio runtime is available.
 #[cfg(feature = "dialogs")]
 fn handle_directory_select(id: String, payload: &Value) -> EffectResponse {
     let title = payload
@@ -157,13 +186,10 @@ fn with_clipboard(
 
     static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
 
-    let mut guard = match CLIPBOARD.lock() {
-        Ok(g) => g,
-        Err(e) => {
-            log::warn!("clipboard mutex poisoned: {e}");
-            return EffectResponse::error(id.to_string(), format!("clipboard lock failed: {e}"));
-        }
-    };
+    let mut guard = CLIPBOARD.lock().unwrap_or_else(|poisoned| {
+        log::warn!("clipboard mutex was poisoned, recovering");
+        poisoned.into_inner()
+    });
 
     let clipboard = match guard.as_mut() {
         Some(c) => c,
@@ -284,6 +310,14 @@ fn handle_clipboard_write_primary(id: String, _payload: &Value) -> EffectRespons
 // Notifications (requires "notifications" feature / notify-rust crate)
 // ---------------------------------------------------------------------------
 
+/// Send an OS notification.
+///
+/// **Platform quirks:**
+/// - **macOS:** Requires the app to be signed or have an Info.plist for
+///   notifications to appear. Notifications go to macOS Notification Center.
+/// - **Linux:** Depends on the desktop environment's notification daemon
+///   (e.g. dunst, mako, GNOME notifications). Behavior varies by DE.
+/// - **Windows:** Uses the Windows toast notification system.
 #[cfg(feature = "notifications")]
 fn handle_notification(id: String, payload: &Value) -> EffectResponse {
     let title = payload
@@ -314,6 +348,10 @@ fn handle_notification(id: String, _payload: &Value) -> EffectResponse {
 
 /// Handle an async effect and return an EffectResponse. The response format
 /// matches the sync handlers exactly so the host can deserialize uniformly.
+///
+// Note: on X11-only Linux desktops without a portal (e.g. minimal WMs),
+// rfd falls back to a GTK dialog which may block a tokio worker thread.
+// This is a known rfd limitation, not specific to julep.
 #[cfg(feature = "dialogs")]
 pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) -> EffectResponse {
     match effect_type {
@@ -508,4 +546,68 @@ mod tests {
     // They can't be meaningfully unit-tested without those services running.
     // Integration-level testing of those paths belongs in a CI environment
     // with Xvfb / a clipboard provider available, not in pure unit tests.
+
+    // -----------------------------------------------------------------------
+    // is_async_effect
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn async_effects_recognized() {
+        assert!(is_async_effect("file_open"));
+        assert!(is_async_effect("file_save"));
+        assert!(is_async_effect("directory_select"));
+    }
+
+    #[test]
+    fn sync_effects_not_async() {
+        assert!(!is_async_effect("clipboard_read"));
+        assert!(!is_async_effect("clipboard_write"));
+        assert!(!is_async_effect("clipboard_read_primary"));
+        assert!(!is_async_effect("clipboard_write_primary"));
+        assert!(!is_async_effect("notification"));
+    }
+
+    #[test]
+    fn unknown_effect_not_async() {
+        assert!(!is_async_effect("teleport_sandwich"));
+        assert!(!is_async_effect(""));
+        assert!(!is_async_effect("FILE_OPEN")); // case-sensitive
+    }
+
+    // -----------------------------------------------------------------------
+    // path_to_json_string
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_normal() {
+        use std::path::Path;
+        assert_eq!(
+            path_to_json_string(Path::new("/home/user/file.txt")),
+            "/home/user/file.txt"
+        );
+    }
+
+    #[test]
+    fn path_empty() {
+        use std::path::Path;
+        assert_eq!(path_to_json_string(Path::new("")), "");
+    }
+
+    #[test]
+    fn path_with_spaces() {
+        use std::path::Path;
+        assert_eq!(
+            path_to_json_string(Path::new("/home/user/my documents/file.txt")),
+            "/home/user/my documents/file.txt"
+        );
+    }
+
+    #[test]
+    fn path_with_special_chars() {
+        use std::path::Path;
+        assert_eq!(
+            path_to_json_string(Path::new("/tmp/test-file_v2 (1).tar.gz")),
+            "/tmp/test-file_v2 (1).tar.gz"
+        );
+    }
 }

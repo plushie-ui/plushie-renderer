@@ -373,3 +373,67 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// Mirrors the clamping logic in OverlayContent::layout().
+    fn clamp_position(
+        x: f32,
+        y: f32,
+        content_w: f32,
+        content_h: f32,
+        viewport_w: f32,
+        viewport_h: f32,
+    ) -> (f32, f32) {
+        let final_x = x.clamp(0.0, (viewport_w - content_w).max(0.0));
+        let final_y = y.clamp(0.0, (viewport_h - content_h).max(0.0));
+        (final_x, final_y)
+    }
+
+    #[test]
+    fn clamp_within_viewport() {
+        let (x, y) = clamp_position(100.0, 100.0, 50.0, 50.0, 800.0, 600.0);
+        assert_eq!((x, y), (100.0, 100.0));
+    }
+
+    #[test]
+    fn clamp_right_edge() {
+        // Content at x=780 with width=50 would extend to 830, beyond viewport 800.
+        let (x, _) = clamp_position(780.0, 100.0, 50.0, 50.0, 800.0, 600.0);
+        assert_eq!(x, 750.0);
+    }
+
+    #[test]
+    fn clamp_bottom_edge() {
+        // Content at y=580 with height=50 would extend to 630, beyond viewport 600.
+        let (_, y) = clamp_position(100.0, 580.0, 50.0, 50.0, 800.0, 600.0);
+        assert_eq!(y, 550.0);
+    }
+
+    #[test]
+    fn clamp_negative() {
+        let (x, y) = clamp_position(-10.0, -20.0, 50.0, 50.0, 800.0, 600.0);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn clamp_content_larger_than_viewport() {
+        // Content bigger than viewport -- best we can do is pin to origin.
+        let (x, y) = clamp_position(100.0, 100.0, 900.0, 700.0, 800.0, 600.0);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn clamp_exact_fit() {
+        // Content exactly fills viewport -- only valid position is (0, 0).
+        let (x, y) = clamp_position(50.0, 50.0, 800.0, 600.0, 800.0, 600.0);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn clamp_zero_size_content() {
+        // Zero-size content can go anywhere within the viewport.
+        let (x, y) = clamp_position(400.0, 300.0, 0.0, 0.0, 800.0, 600.0);
+        assert_eq!((x, y), (400.0, 300.0));
+    }
+}

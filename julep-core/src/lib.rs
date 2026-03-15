@@ -26,6 +26,14 @@
 //! Note: `headless` and `test-mode` features are defined in `julep-renderer` only,
 //! as they affect the binary entrypoint (iced_test Simulator vs real windows).
 //!
+//! **Feature flag interactions:**
+//! - `builtin-all` enables all `widget-*` features.
+//! - `widget-qr-code` requires `widget-canvas` (both use `iced/canvas`).
+//! - `widget-sysinfo` enables `iced/system` which pulls in additional
+//!   system information dependencies.
+//! - The `a11y` feature is independent and can be disabled without affecting
+//!   widget features: `--no-default-features --features builtin-all,dialogs,...`
+//!
 //! ## Module guide
 //!
 //! - [`engine`] -- `Core` struct: pure state management decoupled from iced runtime
@@ -45,6 +53,14 @@
 //! - [`testing`] -- test factory helpers for extension authors
 
 #![deny(warnings)]
+
+// Ensure catch_unwind works: extension panic isolation requires unwinding.
+// If this fails, remove `panic = "abort"` from your Cargo profile.
+#[cfg(all(not(test), panic = "abort"))]
+compile_error!(
+    "julep-core requires panic=\"unwind\" (the default). \
+     Extension panic isolation via catch_unwind is a no-op with panic=\"abort\"."
+);
 
 pub mod app;
 pub mod codec;

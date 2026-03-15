@@ -712,6 +712,14 @@ pub(crate) fn render_toggler<'a>(
 // Radio
 // ---------------------------------------------------------------------------
 
+/// Render a radio button widget.
+///
+/// Radio buttons use a `group` prop to form logical groups. When a radio
+/// in a group is selected, the event uses the `group` value as the event ID
+/// (not the individual radio's node ID). This allows the host to handle
+/// all radios in a group with a single event handler.
+///
+/// Props: `label`, `value`, `selected` (current group value), `group` (event ID).
 pub(crate) fn render_radio<'a>(
     node: &'a TreeNode,
     caches: &'a WidgetCaches,

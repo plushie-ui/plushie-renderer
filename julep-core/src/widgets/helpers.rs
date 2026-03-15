@@ -398,7 +398,9 @@ pub(crate) fn parse_font(value: &Value) -> Font {
 
             if let Some(family) = obj.get("family").and_then(|v| v.as_str()) {
                 match family.to_ascii_lowercase().as_str() {
-                    "monospace" | "mono" => f = Font::MONOSPACE,
+                    "monospace" | "mono" => {
+                        f.family = font::Family::Monospace;
+                    }
                     "serif" => {
                         f.family = font::Family::Serif;
                     }
@@ -421,19 +423,34 @@ pub(crate) fn parse_font(value: &Value) -> Font {
                 }
             }
 
-            if let Some(weight) = obj.get("weight").and_then(|v| v.as_str()) {
-                f.weight = match weight.to_ascii_lowercase().as_str() {
-                    "thin" => font::Weight::Thin,
-                    "extralight" | "extra_light" => font::Weight::ExtraLight,
-                    "light" => font::Weight::Light,
-                    "normal" | "regular" => font::Weight::Normal,
-                    "medium" => font::Weight::Medium,
-                    "semibold" | "semi_bold" => font::Weight::Semibold,
-                    "bold" => font::Weight::Bold,
-                    "extrabold" | "extra_bold" => font::Weight::ExtraBold,
-                    "black" => font::Weight::Black,
-                    _ => font::Weight::Normal,
-                };
+            if let Some(weight_val) = obj.get("weight") {
+                if let Some(weight_num) = weight_val.as_u64() {
+                    f.weight = match weight_num {
+                        100 => font::Weight::Thin,
+                        200 => font::Weight::ExtraLight,
+                        300 => font::Weight::Light,
+                        400 => font::Weight::Normal,
+                        500 => font::Weight::Medium,
+                        600 => font::Weight::Semibold,
+                        700 => font::Weight::Bold,
+                        800 => font::Weight::ExtraBold,
+                        900 => font::Weight::Black,
+                        _ => font::Weight::Normal,
+                    };
+                } else if let Some(weight) = weight_val.as_str() {
+                    f.weight = match weight.to_ascii_lowercase().as_str() {
+                        "thin" => font::Weight::Thin,
+                        "extralight" | "extra_light" => font::Weight::ExtraLight,
+                        "light" => font::Weight::Light,
+                        "normal" | "regular" => font::Weight::Normal,
+                        "medium" => font::Weight::Medium,
+                        "semibold" | "semi_bold" => font::Weight::Semibold,
+                        "bold" => font::Weight::Bold,
+                        "extrabold" | "extra_bold" => font::Weight::ExtraBold,
+                        "black" => font::Weight::Black,
+                        _ => font::Weight::Normal,
+                    };
+                }
             }
 
             if let Some(style) = obj.get("style").and_then(|v| v.as_str()) {
@@ -1167,6 +1184,15 @@ mod tests {
         let v = json!({"family": "serif"});
         let f = parse_font(&v);
         assert_eq!(f.family, font::Family::Serif);
+    }
+
+    #[test]
+    fn parse_font_monospace_preserves_weight_and_style() {
+        let v = json!({"family": "monospace", "weight": "bold", "style": "italic"});
+        let f = parse_font(&v);
+        assert_eq!(f.family, font::Family::Monospace);
+        assert_eq!(f.weight, font::Weight::Bold);
+        assert_eq!(f.style, font::Style::Italic);
     }
 
     // -- parse_padding_value --

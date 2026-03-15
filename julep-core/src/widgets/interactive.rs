@@ -356,7 +356,7 @@ pub(crate) fn render_overlay<'a>(
 
     let children = &node.children;
     if children.len() < 2 {
-        return text("overlay requires 2 children").into();
+        return text(format!("overlay requires 2 children (id={})", node.id)).into();
     }
 
     let anchor = super::render(&children[0], caches, images, theme, dispatcher);

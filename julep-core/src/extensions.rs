@@ -12,6 +12,15 @@ use crate::message::Message;
 use crate::protocol::{OutgoingEvent, TreeNode};
 use crate::widgets::WidgetCaches;
 
+/// Check if panic isolation is disabled via the JULEP_NO_CATCH_UNWIND env var.
+/// When true, extension panics propagate normally, preserving stack traces for
+/// debugging. Only use during development -- in production, catch_unwind
+/// prevents one extension from crashing the entire renderer.
+pub(crate) fn catch_unwind_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("JULEP_NO_CATCH_UNWIND").is_err())
+}
+
 // ---------------------------------------------------------------------------
 // WidgetExtension trait
 // ---------------------------------------------------------------------------
@@ -76,6 +85,34 @@ use crate::widgets::WidgetCaches;
 /// receives read-only access via `WidgetEnv.caches`. This split matches
 /// iced's `update()`/`view()` separation -- mutation happens in `update`,
 /// reads in `view`.
+///
+/// # Examples
+///
+/// A minimal render-only extension that displays a greeting:
+///
+/// ```rust,ignore
+/// use julep_core::prelude::*;
+///
+/// struct GreetingExtension;
+///
+/// impl WidgetExtension for GreetingExtension {
+///     fn type_names(&self) -> &[&str] {
+///         &["greeting"]
+///     }
+///
+///     fn config_key(&self) -> &str {
+///         "greeting"
+///     }
+///
+///     fn render<'a>(&self, node: &'a TreeNode, _env: &WidgetEnv<'a>) -> Element<'a, Message> {
+///         use julep_core::iced::widget::text;
+///         let name = node.props.get("name")
+///             .and_then(|v| v.as_str())
+///             .unwrap_or("world");
+///         text(format!("Hello, {name}!")).into()
+///     }
+/// }
+/// ```
 pub trait WidgetExtension: Send + Sync + 'static {
     /// Node type names this extension handles (e.g. ["sparkline", "heatmap"]).
     fn type_names(&self) -> &[&str];
@@ -108,6 +145,16 @@ pub trait WidgetExtension: Send + Sync + 'static {
     }
 
     /// Handle a command sent from the host directly to this extension.
+    ///
+    /// The host sends `ExtensionCommand` messages with an `op` string and a
+    /// JSON `payload`. By convention, `op` names use `snake_case` and are
+    /// scoped to the extension (e.g. `"reset_zoom"`, `"set_data"`). The
+    /// extension decides what ops it supports; unrecognized ops should be
+    /// logged and ignored (return an empty vec).
+    ///
+    /// Return a vec of `OutgoingEvent`s to emit back to the host. Errors
+    /// should be reported as events with family `"extension_error"` and
+    /// relevant details in the data payload, rather than panicking.
     fn handle_command(
         &mut self,
         _node_id: &str,
@@ -127,12 +174,22 @@ pub trait WidgetExtension: Send + Sync + 'static {
 // ---------------------------------------------------------------------------
 
 /// Result of extension event handling.
+///
+/// Returned from [`WidgetExtension::handle_event`] to control whether the
+/// original event reaches the host and whether additional events are emitted.
+#[derive(Debug)]
+#[must_use = "an EventResult should not be silently discarded"]
 pub enum EventResult {
-    /// Don't handle -- forward to the host as-is.
+    /// Don't handle -- forward the original event to the host as-is.
     PassThrough,
-    /// Handled internally. Don't forward original. Optionally emit different events.
+    /// The extension consumed the event. The original event is suppressed and
+    /// will NOT be forwarded to the host. The contained events (if any) are
+    /// emitted instead. Note: `Consumed(vec![])` suppresses the original
+    /// event without emitting any replacement -- use this intentionally, as
+    /// the host will never see the event.
     Consumed(Vec<OutgoingEvent>),
-    /// Handled internally AND forward original. Additional events also emitted.
+    /// The extension observed the event. The original event IS forwarded to
+    /// the host, and the contained additional events are also emitted.
     Observed(Vec<OutgoingEvent>),
 }
 
@@ -382,7 +439,7 @@ impl ExtensionDispatcher {
                         "skipping cleanup for poisoned extension `{ns}`; \
                          cache entry removed for node `{old_id}`",
                     );
-                } else {
+                } else if catch_unwind_enabled() {
                     let result = catch_unwind(AssertUnwindSafe(|| {
                         self.extensions[*ext_idx].cleanup(old_id, caches);
                     }));
@@ -392,6 +449,8 @@ impl ExtensionDispatcher {
                         self.poisoned[*ext_idx] = true;
                         caches.remove(&ns, old_id);
                     }
+                } else {
+                    self.extensions[*ext_idx].cleanup(old_id, caches);
                 }
             }
         }
@@ -436,16 +495,20 @@ impl ExtensionDispatcher {
         }
         if let Some(&idx) = self.type_name_index.get(node.type_name.as_str()) {
             if !self.poisoned[idx] {
-                let result = catch_unwind(AssertUnwindSafe(|| {
+                if catch_unwind_enabled() {
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        self.extensions[idx].prepare(node, caches, theme);
+                    }));
+                    if let Err(panic) = result {
+                        let msg = panic_message(&panic);
+                        log::error!(
+                            "extension `{}` panicked in prepare: {msg}",
+                            self.extensions[idx].config_key()
+                        );
+                        self.poisoned[idx] = true;
+                    }
+                } else {
                     self.extensions[idx].prepare(node, caches, theme);
-                }));
-                if let Err(panic) = result {
-                    let msg = panic_message(&panic);
-                    log::error!(
-                        "extension `{}` panicked in prepare: {msg}",
-                        self.extensions[idx].config_key()
-                    );
-                    self.poisoned[idx] = true;
                 }
             }
             map.insert(node.id.clone(), idx);
@@ -470,19 +533,23 @@ impl ExtensionDispatcher {
         if self.poisoned[ext_idx] {
             return EventResult::PassThrough;
         }
-        match catch_unwind(AssertUnwindSafe(|| {
-            self.extensions[ext_idx].handle_event(id, family, data, caches)
-        })) {
-            Ok(result) => result,
-            Err(panic) => {
-                let msg = panic_message(&panic);
-                log::error!(
-                    "extension `{}` panicked in handle_event: {msg}",
-                    self.extensions[ext_idx].config_key()
-                );
-                self.poisoned[ext_idx] = true;
-                EventResult::PassThrough
+        if catch_unwind_enabled() {
+            match catch_unwind(AssertUnwindSafe(|| {
+                self.extensions[ext_idx].handle_event(id, family, data, caches)
+            })) {
+                Ok(result) => result,
+                Err(panic) => {
+                    let msg = panic_message(&panic);
+                    log::error!(
+                        "extension `{}` panicked in handle_event: {msg}",
+                        self.extensions[ext_idx].config_key()
+                    );
+                    self.poisoned[ext_idx] = true;
+                    EventResult::PassThrough
+                }
             }
+        } else {
+            self.extensions[ext_idx].handle_event(id, family, data, caches)
         }
     }
 
@@ -498,34 +565,45 @@ impl ExtensionDispatcher {
             Some(&idx) => idx,
             None => {
                 log::warn!("extension command for unknown node `{node_id}`, ignoring");
-                return vec![];
+                return vec![OutgoingEvent::generic(
+                    "extension_error".to_string(),
+                    node_id.to_string(),
+                    Some(serde_json::json!({
+                        "error": format!("no extension handles node `{node_id}`"),
+                        "op": op,
+                    })),
+                )];
             }
         };
         if self.poisoned[ext_idx] {
             return vec![];
         }
-        match catch_unwind(AssertUnwindSafe(|| {
-            self.extensions[ext_idx].handle_command(node_id, op, payload, caches)
-        })) {
-            Ok(events) => events,
-            Err(panic) => {
-                let msg = panic_message(&panic);
-                log::error!(
-                    "extension `{}` panicked in handle_command: {msg}",
-                    self.extensions[ext_idx].config_key()
-                );
-                self.poisoned[ext_idx] = true;
-                // Report the panic back to the host so it can handle it.
-                let error_data = serde_json::json!({
-                    "error": msg,
-                    "op": op,
-                });
-                vec![OutgoingEvent::generic(
-                    "extension_error",
-                    node_id.to_string(),
-                    Some(error_data),
-                )]
+        if catch_unwind_enabled() {
+            match catch_unwind(AssertUnwindSafe(|| {
+                self.extensions[ext_idx].handle_command(node_id, op, payload, caches)
+            })) {
+                Ok(events) => events,
+                Err(panic) => {
+                    let msg = panic_message(&panic);
+                    log::error!(
+                        "extension `{}` panicked in handle_command: {msg}",
+                        self.extensions[ext_idx].config_key()
+                    );
+                    self.poisoned[ext_idx] = true;
+                    // Report the panic back to the host so it can handle it.
+                    let error_data = serde_json::json!({
+                        "error": msg,
+                        "op": op,
+                    });
+                    vec![OutgoingEvent::generic(
+                        "extension_error",
+                        node_id.to_string(),
+                        Some(error_data),
+                    )]
+                }
             }
+        } else {
+            self.extensions[ext_idx].handle_command(node_id, op, payload, caches)
         }
     }
 
@@ -539,13 +617,17 @@ impl ExtensionDispatcher {
             }
             let key = ext.config_key().to_string();
             let slice = config.get(&key).unwrap_or(&Value::Null);
-            let result = catch_unwind(AssertUnwindSafe(|| {
+            if catch_unwind_enabled() {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    ext.init(slice);
+                }));
+                if let Err(panic) = result {
+                    let msg = panic_message(&panic);
+                    log::error!("extension `{key}` panicked in init: {msg}");
+                    self.poisoned[idx] = true;
+                }
+            } else {
                 ext.init(slice);
-            }));
-            if let Err(panic) = result {
-                let msg = panic_message(&panic);
-                log::error!("extension `{key}` panicked in init: {msg}");
-                self.poisoned[idx] = true;
             }
         }
     }
@@ -606,16 +688,20 @@ impl ExtensionDispatcher {
             if self.poisoned[ext_idx] {
                 continue;
             }
-            let result = catch_unwind(AssertUnwindSafe(|| {
+            if catch_unwind_enabled() {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    self.extensions[ext_idx].cleanup(node_id, caches);
+                }));
+                if let Err(panic) = result {
+                    let msg = panic_message(&panic);
+                    log::error!(
+                        "extension `{}` panicked in cleanup: {msg}",
+                        self.extensions[ext_idx].config_key()
+                    );
+                    self.poisoned[ext_idx] = true;
+                }
+            } else {
                 self.extensions[ext_idx].cleanup(node_id, caches);
-            }));
-            if let Err(panic) = result {
-                let msg = panic_message(&panic);
-                log::error!(
-                    "extension `{}` panicked in cleanup: {msg}",
-                    self.extensions[ext_idx].config_key()
-                );
-                self.poisoned[ext_idx] = true;
             }
         }
     }
@@ -721,9 +807,12 @@ impl Default for GenerationCounter {
 fn render_poisoned_placeholder<'a>(node: &TreeNode) -> Element<'a, Message> {
     use iced::widget::text;
     use iced::Color;
-    text(format!("Extension error: node `{}`", node.id))
-        .color(Color::from_rgb(1.0, 0.0, 0.0))
-        .into()
+    text(format!(
+        "Extension error: type `{}`, node `{}`",
+        node.type_name, node.id
+    ))
+    .color(Color::from_rgb(1.0, 0.0, 0.0))
+    .into()
 }
 
 fn panic_message(panic: &Box<dyn Any + Send>) -> String {

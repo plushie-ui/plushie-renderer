@@ -164,6 +164,9 @@ pub(crate) fn render_image<'a>(
     // source can be a string (file path) or an object with a "handle" field
     // (in-memory image from the registry).
     let source_val = props.and_then(|p| p.get("source"));
+    if source_val.is_none() {
+        log::warn!("[id={}] image: no 'source' prop specified", node.id);
+    }
     let handle: iced::widget::image::Handle = match source_val {
         Some(Value::Object(obj)) => {
             if let Some(name) = obj.get("handle").and_then(|v| v.as_str()) {
@@ -240,6 +243,9 @@ pub(crate) fn render_svg<'a>(node: &'a TreeNode) -> Element<'a, Message> {
 
     let props = node.props.as_object();
     let source = prop_str(props, "source").unwrap_or_default();
+    if source.is_empty() {
+        log::warn!("[id={}] svg: no 'source' prop specified", node.id);
+    }
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
     let content_fit = prop_content_fit(props);
@@ -341,7 +347,9 @@ pub(crate) fn render_markdown<'a>(
 pub(crate) fn render_progress_bar<'a>(node: &'a TreeNode) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f32(props);
-    let value = prop_f32(props, "value").unwrap_or(0.0);
+    let value = prop_f32(props, "value")
+        .unwrap_or(0.0)
+        .clamp(*range.start(), *range.end());
     let width = prop_length(props, "width", Length::Fill);
     let height = prop_length(props, "height", Length::Shrink);
 

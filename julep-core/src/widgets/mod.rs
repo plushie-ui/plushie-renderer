@@ -53,22 +53,25 @@ const MAX_TREE_DEPTH: usize = 256;
 /// Bundles all per-widget caches into a single struct so render functions
 /// don't need to thread 3+ separate HashMap parameters everywhere.
 pub struct WidgetCaches {
-    pub editor_contents: HashMap<String, text_editor::Content>,
+    pub(crate) editor_contents: HashMap<String, text_editor::Content>,
+    /// Tracks the hash of the last-synced "content" prop for each text_editor.
+    /// Used to detect host-side prop changes without clobbering user edits.
+    pub(crate) editor_content_hashes: HashMap<String, u64>,
     #[cfg(feature = "widget-markdown")]
-    pub markdown_items: HashMap<String, (u64, Vec<markdown::Item>)>,
-    pub combo_states: HashMap<String, combo_box::State<String>>,
-    pub combo_options: HashMap<String, Vec<String>>,
-    pub pane_grid_states: HashMap<String, pane_grid::State<String>>,
+    pub(crate) markdown_items: HashMap<String, (u64, Vec<markdown::Item>)>,
+    pub(crate) combo_states: HashMap<String, combo_box::State<String>>,
+    pub(crate) combo_options: HashMap<String, Vec<String>>,
+    pub(crate) pane_grid_states: HashMap<String, pane_grid::State<String>>,
     /// Per-canvas, per-layer geometry caches. Outer key is node ID, inner key
     /// is layer name. The u64 is a content hash of the layer's shapes array --
     /// when it changes the cache is cleared so the layer re-tessellates.
     #[cfg(feature = "widget-canvas")]
-    pub canvas_caches: HashMap<String, HashMap<String, (u64, iced_canvas::Cache)>>,
+    pub(crate) canvas_caches: HashMap<String, HashMap<String, (u64, iced_canvas::Cache)>>,
     /// Per-qr_code caches. Key is node ID, value is (content hash, canvas Cache).
     #[cfg(feature = "widget-qr-code")]
-    pub qr_code_caches: HashMap<String, (u64, iced_canvas::Cache)>,
-    pub default_text_size: Option<f32>,
-    pub default_font: Option<Font>,
+    pub(crate) qr_code_caches: HashMap<String, (u64, iced_canvas::Cache)>,
+    pub(crate) default_text_size: Option<f32>,
+    pub(crate) default_font: Option<Font>,
     pub extension: crate::extensions::ExtensionCaches,
 }
 
@@ -82,6 +85,7 @@ impl WidgetCaches {
     pub fn new() -> Self {
         Self {
             editor_contents: HashMap::new(),
+            editor_content_hashes: HashMap::new(),
             #[cfg(feature = "widget-markdown")]
             markdown_items: HashMap::new(),
             combo_states: HashMap::new(),
@@ -102,6 +106,25 @@ impl WidgetCaches {
         self.extension.clear();
     }
 
+    // -- Accessor methods for renderer crate --
+    // Fields are pub(crate) to avoid leaking internal HashMap structure to
+    // extension authors, but the renderer binary needs access to a few.
+
+    /// Get a mutable reference to a text_editor Content by node ID.
+    pub fn editor_content_mut(&mut self, id: &str) -> Option<&mut text_editor::Content> {
+        self.editor_contents.get_mut(id)
+    }
+
+    /// Get a mutable reference to a pane_grid State by node ID.
+    pub fn pane_grid_state_mut(&mut self, id: &str) -> Option<&mut pane_grid::State<String>> {
+        self.pane_grid_states.get_mut(id)
+    }
+
+    /// Get an immutable reference to a pane_grid State by node ID.
+    pub fn pane_grid_state(&self, id: &str) -> Option<&pane_grid::State<String>> {
+        self.pane_grid_states.get(id)
+    }
+
     /// Clear built-in widget caches without touching extension caches.
     ///
     /// Used by the Snapshot handler so that extension cleanup callbacks
@@ -109,6 +132,7 @@ impl WidgetCaches {
     /// extension cache entries are removed.
     pub fn clear_builtin(&mut self) {
         self.editor_contents.clear();
+        self.editor_content_hashes.clear();
         #[cfg(feature = "widget-markdown")]
         self.markdown_items.clear();
         self.combo_states.clear();
@@ -125,10 +149,10 @@ impl WidgetCaches {
 // Cache pre-population
 // ---------------------------------------------------------------------------
 
-/// Walk the tree and ensure that every `text_editor`, `markdown`, and
-/// `combo_box` node has an entry in the corresponding cache. This must be
-/// called *before* `render` so that `render` can work with shared (`&`)
-/// references to the caches.
+/// Walk the tree and ensure that every `text_editor`, `markdown`,
+/// `combo_box`, `pane_grid`, `canvas`, and `qr_code` node has an entry in
+/// the corresponding cache. This must be called *before* `render` so that
+/// `render` can work with shared (`&`) references to the caches.
 ///
 /// After populating caches, prunes stale entries for nodes no longer in the
 /// tree across all cache types.
@@ -158,10 +182,20 @@ fn ensure_caches_walk(
         "text_editor" => {
             let props = node.props.as_object();
             let content_str = prop_str(props, "content").unwrap_or_default();
-            caches
-                .editor_contents
-                .entry(node.id.clone())
-                .or_insert_with(|| text_editor::Content::with_text(&content_str));
+            let prop_hash = hash_str(&content_str);
+            let prev_hash = caches.editor_content_hashes.get(&node.id).copied();
+            if prev_hash != Some(prop_hash) {
+                // Host changed the content prop -- (re)create the Content.
+                caches.editor_contents.insert(
+                    node.id.clone(),
+                    text_editor::Content::with_text(&content_str),
+                );
+                caches
+                    .editor_content_hashes
+                    .insert(node.id.clone(), prop_hash);
+            }
+            // If hash matches, Content is already initialized and we preserve
+            // any user edits that happened since the last prop sync.
         }
         #[cfg(feature = "widget-markdown")]
         "markdown" => {
@@ -197,6 +231,11 @@ fn ensure_caches_walk(
             }
         }
         "pane_grid" => {
+            let props = node.props.as_object();
+            let axis = match prop_str(props, "split_axis").as_deref() {
+                Some("horizontal") => pane_grid::Axis::Horizontal,
+                _ => pane_grid::Axis::Vertical,
+            };
             let child_ids: HashSet<String> = node.children.iter().map(|c| c.id.clone()).collect();
 
             if let Some(state) = caches.pane_grid_states.get_mut(&node.id) {
@@ -210,6 +249,21 @@ fn ensure_caches_walk(
                 for pane in stale_panes {
                     state.close(pane);
                 }
+                // Add panes for new children that don't have a pane yet.
+                // Collect owned IDs to avoid holding an immutable borrow on
+                // state.panes while we call state.split() (mutable).
+                let existing_ids: HashSet<String> = state.panes.values().cloned().collect();
+                let new_child_ids: Vec<String> = node
+                    .children
+                    .iter()
+                    .filter(|c| !existing_ids.contains(&c.id))
+                    .map(|c| c.id.clone())
+                    .collect();
+                for new_id in new_child_ids {
+                    if let Some((&anchor, _)) = state.panes.iter().next() {
+                        let _ = state.split(axis, anchor, new_id);
+                    }
+                }
             } else {
                 let child_list: Vec<String> = node.children.iter().map(|c| c.id.clone()).collect();
                 let new_state = if child_list.is_empty() {
@@ -222,9 +276,7 @@ fn ensure_caches_walk(
                     let (mut state, first_pane) = pane_grid::State::new(child_list[0].clone());
                     let mut last_pane = first_pane;
                     for id in child_list.iter().skip(1) {
-                        if let Some((new_pane, _)) =
-                            state.split(pane_grid::Axis::Vertical, last_pane, id.clone())
-                        {
+                        if let Some((new_pane, _)) = state.split(axis, last_pane, id.clone()) {
                             last_pane = new_pane;
                         }
                     }
@@ -247,11 +299,12 @@ fn ensure_caches_walk(
                     hash_json_value(shapes_val, &mut hasher);
                     hasher.finish()
                 };
-                match node_caches.get(layer_name) {
-                    Some((existing_hash, _cache)) => {
+                match node_caches.get_mut(layer_name) {
+                    Some((existing_hash, cache)) => {
                         if *existing_hash != hash {
-                            node_caches
-                                .insert(layer_name.clone(), (hash, iced_canvas::Cache::new()));
+                            cache.clear();
+                            // Update just the hash, keep the same cache object.
+                            *existing_hash = hash;
                         }
                     }
                     None => {
@@ -276,13 +329,12 @@ fn ensure_caches_walk(
             ec.hash(&mut hasher);
             let hash = hasher.finish();
 
-            match caches.qr_code_caches.get(&node.id) {
-                Some((existing_hash, existing_cache)) => {
+            match caches.qr_code_caches.get_mut(&node.id) {
+                Some((existing_hash, cache)) => {
                     if *existing_hash != hash {
-                        existing_cache.clear();
-                        caches
-                            .qr_code_caches
-                            .insert(node.id.clone(), (hash, iced_canvas::Cache::new()));
+                        cache.clear();
+                        // Update just the hash, keep the same cache object.
+                        *existing_hash = hash;
                     }
                 }
                 None => {
@@ -303,6 +355,9 @@ fn ensure_caches_walk(
 /// Prune all cache types, removing entries whose node IDs are no longer live.
 fn prune_all_stale_caches(live_ids: &HashSet<String>, caches: &mut WidgetCaches) {
     caches.editor_contents.retain(|id, _| live_ids.contains(id));
+    caches
+        .editor_content_hashes
+        .retain(|id, _| live_ids.contains(id));
     #[cfg(feature = "widget-markdown")]
     caches.markdown_items.retain(|id, _| live_ids.contains(id));
     caches.combo_states.retain(|id, _| live_ids.contains(id));
@@ -448,25 +503,35 @@ pub fn render<'a>(
                 // We track consecutive render panics via an atomic counter
                 // on the dispatcher; after N consecutive panics, the
                 // extension is poisoned on the next prepare_all cycle.
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    dispatcher.render(node, &env)
-                })) {
-                    Ok(Some(element)) => element,
-                    Ok(None) => container(Space::new()).into(),
-                    Err(_) => {
-                        let at_threshold = dispatcher.record_render_panic(unknown);
-                        if at_threshold {
-                            log::error!(
-                                "[id={}] extension for type `{unknown}` hit render panic \
-                                 threshold, will be poisoned on next prepare cycle",
+                if crate::extensions::catch_unwind_enabled() {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        dispatcher.render(node, &env)
+                    })) {
+                        Ok(Some(element)) => element,
+                        Ok(None) => container(Space::new()).into(),
+                        Err(_) => {
+                            let at_threshold = dispatcher.record_render_panic(unknown);
+                            if at_threshold {
+                                log::error!(
+                                    "[id={}] extension for type `{unknown}` hit render panic \
+                                     threshold, will be poisoned on next prepare cycle",
+                                    node.id
+                                );
+                            } else {
+                                log::error!("extension panicked in render for node `{}`", node.id);
+                            }
+                            iced::widget::text(format!(
+                                "Extension error: type `{unknown}`, node `{}`",
                                 node.id
-                            );
-                        } else {
-                            log::error!("extension panicked in render for node `{}`", node.id);
-                        }
-                        iced::widget::text(format!("Extension error: node `{}`", node.id))
+                            ))
                             .color(iced::Color::from_rgb(1.0, 0.0, 0.0))
                             .into()
+                        }
+                    }
+                } else {
+                    match dispatcher.render(node, &env) {
+                        Some(element) => element,
+                        None => container(Space::new()).into(),
                     }
                 }
             } else {
@@ -495,6 +560,10 @@ pub fn render<'a>(
     feature = "widget-qr-code"
 )))]
 fn render_feature_disabled<'a>(widget_name: &str, feature_name: &str) -> Element<'a, Message> {
+    log::warn!(
+        "widget `{widget_name}` requires feature `{feature_name}` -- \
+         enable it with: cargo build --features {feature_name}"
+    );
     iced::widget::text(format!(
         "Widget '{}' requires feature '{}'",
         widget_name, feature_name
