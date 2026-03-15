@@ -63,4 +63,4 @@ pub mod tree;
 pub mod widgets;
 
 #[cfg(feature = "a11y")]
-pub mod accessibility;
+pub(crate) mod a11y_widget;

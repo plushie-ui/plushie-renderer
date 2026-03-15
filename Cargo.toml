@@ -9,4 +9,16 @@ license = "MIT"
 repository = "https://github.com/lincracy/julep-renderer"
 
 [patch.crates-io]
-iced_winit = { git = "https://github.com/lincracy/iced", branch = "a11y-accesskit" }
+iced = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_core = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_futures = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_runtime = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_winit = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_renderer = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_widget = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_wgpu = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_tiny_skia = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_graphics = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_debug = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_highlighter = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }
+iced_program = { git = "ssh://git@forgejo.lincracy.internal:2222/lincracy/iced.git", branch = "v0.14.0-a11y-accesskit" }

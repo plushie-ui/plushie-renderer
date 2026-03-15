@@ -291,7 +291,7 @@ pub fn render<'a>(
     #[cfg(debug_assertions)]
     validate_props(node);
 
-    match node.type_name.as_str() {
+    let element = match node.type_name.as_str() {
         "column" => render_column(node, caches, images, theme, dispatcher),
         "row" => render_row(node, caches, images, theme, dispatcher),
         "text" => render_text(node, caches),
@@ -396,7 +396,14 @@ pub fn render<'a>(
                 container(Space::new()).into()
             }
         }
+    };
+
+    #[cfg(feature = "a11y")]
+    if let Some(overrides) = crate::a11y_widget::A11yOverrides::from_props(&node.props) {
+        return crate::a11y_widget::A11yOverride::wrap(element, overrides).into();
     }
+
+    element
 }
 
 #[cfg(not(all(
