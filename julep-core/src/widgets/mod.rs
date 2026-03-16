@@ -520,7 +520,7 @@ pub fn render<'a>(
             "image" | "svg" => {
                 prop_str(props, "alt").map(crate::a11y_widget::A11yOverrides::with_label)
             }
-            "text_input" => prop_str(props, "placeholder")
+            "text_input" | "text_editor" | "combo_box" => prop_str(props, "placeholder")
                 .map(crate::a11y_widget::A11yOverrides::with_description),
             _ => None,
         }

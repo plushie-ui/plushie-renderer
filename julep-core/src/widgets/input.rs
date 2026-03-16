@@ -197,22 +197,24 @@ fn parse_binding(val: &Value, id: &str) -> Option<text_editor::Binding<Message>>
 }
 
 /// Check if a KeyPress matches the modifiers specified in a binding rule.
+///
+/// Requires an exact match: all required modifiers must be pressed, and
+/// no extra modifiers may be active. This prevents a rule for `["shift"]`
+/// from firing on `shift+ctrl+A`.
 fn match_modifiers(mods: &keyboard::Modifiers, required: &[String]) -> bool {
-    for m in required {
-        let ok = match m.as_str() {
-            "shift" => mods.shift(),
-            "ctrl" => mods.control(),
-            "alt" => mods.alt(),
-            "logo" => mods.logo(),
-            "command" => mods.command(),
-            "jump" => mods.jump(),
-            _ => false,
-        };
-        if !ok {
-            return false;
-        }
-    }
-    true
+    let want_shift = required.iter().any(|m| m == "shift");
+    let want_ctrl = required.iter().any(|m| m == "ctrl");
+    let want_alt = required.iter().any(|m| m == "alt");
+    let want_logo = required.iter().any(|m| m == "logo");
+    let want_command = required.iter().any(|m| m == "command");
+    let want_jump = required.iter().any(|m| m == "jump");
+
+    mods.shift() == want_shift
+        && mods.control() == want_ctrl
+        && mods.alt() == want_alt
+        && mods.logo() == want_logo
+        && mods.command() == want_command
+        && mods.jump() == want_jump
 }
 
 /// Match a named key string against a KeyPress key.

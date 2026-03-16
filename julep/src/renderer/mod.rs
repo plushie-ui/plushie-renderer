@@ -1075,7 +1075,7 @@ impl App {
         }
 
         // -- IME subscriptions --
-        if self.core.active_subscriptions.contains_key("on_ime") {
+        if !has_on_event && self.core.active_subscriptions.contains_key("on_ime") {
             subs.push(event::listen_with(|evt, _status, _window| match evt {
                 iced::Event::InputMethod(iced::advanced::input_method::Event::Opened) => {
                     Some(Message::ImeOpened)
