@@ -58,6 +58,20 @@ pub(crate) struct A11yOverrides {
     pub read_only: bool,
     /// Keyboard mnemonic (Alt+letter shortcut).
     pub mnemonic: Option<char>,
+    /// Toggle state for custom checkbox/switch widgets.
+    pub toggled: Option<bool>,
+    /// Selection state for custom radio/tab widgets.
+    pub selected: Option<bool>,
+    /// Text value announced by assistive technology.
+    pub value: Option<String>,
+    /// Widget orientation (horizontal or vertical).
+    pub orientation: Option<accessible::Orientation>,
+    /// Another widget that provides this widget's label.
+    pub labelled_by: Option<widget::Id>,
+    /// Another widget that provides this widget's description.
+    pub described_by: Option<widget::Id>,
+    /// A widget that describes why the value is invalid.
+    pub error_message: Option<widget::Id>,
 }
 
 impl A11yOverrides {
@@ -121,6 +135,32 @@ impl A11yOverrides {
             .and_then(|v| v.as_str())
             .and_then(|s| s.chars().next());
 
+        let toggled = a11y.get("toggled").and_then(|v| v.as_bool());
+
+        let selected = a11y.get("selected").and_then(|v| v.as_bool());
+
+        let value = a11y.get("value").and_then(|v| v.as_str()).map(String::from);
+
+        let orientation = a11y
+            .get("orientation")
+            .and_then(|v| v.as_str())
+            .and_then(parse_orientation);
+
+        let labelled_by = a11y
+            .get("labelled_by")
+            .and_then(|v| v.as_str())
+            .map(|s| widget::Id::from(s.to_owned()));
+
+        let described_by = a11y
+            .get("described_by")
+            .and_then(|v| v.as_str())
+            .map(|s| widget::Id::from(s.to_owned()));
+
+        let error_message = a11y
+            .get("error_message")
+            .and_then(|v| v.as_str())
+            .map(|s| widget::Id::from(s.to_owned()));
+
         Some(Self {
             role,
             label,
@@ -135,6 +175,13 @@ impl A11yOverrides {
             modal,
             read_only,
             mnemonic,
+            toggled,
+            selected,
+            value,
+            orientation,
+            labelled_by,
+            described_by,
+            error_message,
         })
     }
 
@@ -155,6 +202,13 @@ impl A11yOverrides {
             || self.invalid
             || self.modal
             || self.read_only
+            || self.toggled.is_some()
+            || self.selected.is_some()
+            || self.value.is_some()
+            || self.orientation.is_some()
+            || self.labelled_by.is_some()
+            || self.described_by.is_some()
+            || self.error_message.is_some()
     }
 
     /// Create overrides with just a label (for alt text auto-inference).
@@ -232,6 +286,15 @@ fn parse_live(s: &str) -> Option<accessible::Live> {
     match s {
         "polite" => Some(accessible::Live::Polite),
         "assertive" => Some(accessible::Live::Assertive),
+        _ => None,
+    }
+}
+
+/// Parse an orientation string into [`accessible::Orientation`].
+fn parse_orientation(s: &str) -> Option<accessible::Orientation> {
+    match s {
+        "horizontal" => Some(accessible::Orientation::Horizontal),
+        "vertical" => Some(accessible::Orientation::Vertical),
         _ => None,
     }
 }
@@ -422,6 +485,8 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
         // Build a new Accessible with overrides applied. The new struct
         // borrows label/description from self.overrides (owned Strings)
         // for the duration of this call.
+        let value_override = self.overrides.value.as_deref().map(accessible::Value::Text);
+
         let overridden = Accessible {
             role: self.overrides.role.unwrap_or(accessible.role),
             label: self.overrides.label.as_deref().or(accessible.label),
@@ -439,6 +504,25 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
             modal: self.overrides.modal || accessible.modal,
             read_only: self.overrides.read_only || accessible.read_only,
             mnemonic: self.overrides.mnemonic.or(accessible.mnemonic),
+            toggled: self.overrides.toggled.or(accessible.toggled),
+            selected: self.overrides.selected.or(accessible.selected),
+            value: value_override.or(accessible.value),
+            orientation: self.overrides.orientation.or(accessible.orientation),
+            labelled_by: self
+                .overrides
+                .labelled_by
+                .as_ref()
+                .or(accessible.labelled_by),
+            described_by: self
+                .overrides
+                .described_by
+                .as_ref()
+                .or(accessible.described_by),
+            error_message: self
+                .overrides
+                .error_message
+                .as_ref()
+                .or(accessible.error_message),
             ..accessible.clone()
         };
         self.inner.accessible(id, bounds, &overridden);
@@ -451,6 +535,8 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
         // would silently ignore a11y overrides because they only call
         // container(), never accessible().
         if self.overrides.has_accessible_overrides() {
+            let value_override = self.overrides.value.as_deref().map(accessible::Value::Text);
+
             let base = Accessible {
                 role: self.overrides.role.unwrap_or_default(),
                 label: self.overrides.label.as_deref(),
@@ -464,6 +550,13 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
                 modal: self.overrides.modal,
                 read_only: self.overrides.read_only,
                 mnemonic: self.overrides.mnemonic,
+                toggled: self.overrides.toggled,
+                selected: self.overrides.selected,
+                value: value_override,
+                orientation: self.overrides.orientation,
+                labelled_by: self.overrides.labelled_by.as_ref(),
+                described_by: self.overrides.described_by.as_ref(),
+                error_message: self.overrides.error_message.as_ref(),
                 ..Accessible::default()
             };
             self.inner.accessible(id, bounds, &base);
@@ -663,7 +756,11 @@ mod tests {
                 "invalid": true,
                 "modal": true,
                 "read_only": true,
-                "mnemonic": "E"
+                "mnemonic": "E",
+                "toggled": true,
+                "selected": false,
+                "value": "42%",
+                "orientation": "vertical"
             }
         });
         let overrides = A11yOverrides::from_props(&props).unwrap();
@@ -683,6 +780,13 @@ mod tests {
         assert!(overrides.modal);
         assert!(overrides.read_only);
         assert_eq!(overrides.mnemonic, Some('E'));
+        assert_eq!(overrides.toggled, Some(true));
+        assert_eq!(overrides.selected, Some(false));
+        assert_eq!(overrides.value.as_deref(), Some("42%"));
+        assert_eq!(
+            overrides.orientation,
+            Some(accessible::Orientation::Vertical)
+        );
     }
 
     #[test]
@@ -871,6 +975,10 @@ mod tests {
         assert!(!overrides.modal);
         assert!(!overrides.read_only);
         assert!(overrides.mnemonic.is_none());
+        assert!(overrides.toggled.is_none());
+        assert!(overrides.selected.is_none());
+        assert!(overrides.value.is_none());
+        assert!(overrides.orientation.is_none());
     }
 
     #[test]
@@ -898,5 +1006,209 @@ mod tests {
         assert!(!overrides.modal);
         assert!(!overrides.read_only);
         assert!(overrides.mnemonic.is_none());
+        assert!(overrides.toggled.is_none());
+        assert!(overrides.selected.is_none());
+        assert!(overrides.value.is_none());
+        assert!(overrides.orientation.is_none());
+        assert!(overrides.labelled_by.is_none());
+        assert!(overrides.described_by.is_none());
+        assert!(overrides.error_message.is_none());
+    }
+
+    #[test]
+    fn from_props_parses_labelled_by() {
+        let props = json!({"a11y": {"labelled_by": "email-label"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.labelled_by.is_some());
+    }
+
+    #[test]
+    fn from_props_parses_described_by() {
+        let props = json!({"a11y": {"described_by": "email-help"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.described_by.is_some());
+    }
+
+    #[test]
+    fn from_props_parses_error_message() {
+        let props = json!({"a11y": {"error_message": "email-error"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.error_message.is_some());
+    }
+
+    #[test]
+    fn from_props_relationships_default_none() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.labelled_by.is_none());
+        assert!(overrides.described_by.is_none());
+        assert!(overrides.error_message.is_none());
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_labelled_by() {
+        let overrides = A11yOverrides {
+            labelled_by: Some(widget::Id::from("label-id".to_owned())),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_described_by() {
+        let overrides = A11yOverrides {
+            described_by: Some(widget::Id::from("desc-id".to_owned())),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_error_message() {
+        let overrides = A11yOverrides {
+            error_message: Some(widget::Id::from("err-id".to_owned())),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
+    }
+
+    #[test]
+    fn from_props_parses_toggled_true() {
+        let props = json!({"a11y": {"toggled": true}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.toggled, Some(true));
+    }
+
+    #[test]
+    fn from_props_parses_toggled_false() {
+        let props = json!({"a11y": {"toggled": false}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.toggled, Some(false));
+    }
+
+    #[test]
+    fn from_props_toggled_defaults_none() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.toggled.is_none());
+    }
+
+    #[test]
+    fn from_props_parses_selected_true() {
+        let props = json!({"a11y": {"selected": true}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.selected, Some(true));
+    }
+
+    #[test]
+    fn from_props_parses_selected_false() {
+        let props = json!({"a11y": {"selected": false}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.selected, Some(false));
+    }
+
+    #[test]
+    fn from_props_selected_defaults_none() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.selected.is_none());
+    }
+
+    #[test]
+    fn from_props_parses_value() {
+        let props = json!({"a11y": {"value": "75%"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(overrides.value.as_deref(), Some("75%"));
+    }
+
+    #[test]
+    fn from_props_value_defaults_none() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.value.is_none());
+    }
+
+    #[test]
+    fn from_props_parses_orientation_horizontal() {
+        let props = json!({"a11y": {"orientation": "horizontal"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(
+            overrides.orientation,
+            Some(accessible::Orientation::Horizontal)
+        );
+    }
+
+    #[test]
+    fn from_props_parses_orientation_vertical() {
+        let props = json!({"a11y": {"orientation": "vertical"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert_eq!(
+            overrides.orientation,
+            Some(accessible::Orientation::Vertical)
+        );
+    }
+
+    #[test]
+    fn from_props_orientation_defaults_none() {
+        let props = json!({"a11y": {"label": "test"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.orientation.is_none());
+    }
+
+    #[test]
+    fn from_props_orientation_ignores_invalid() {
+        let props = json!({"a11y": {"orientation": "diagonal"}});
+        let overrides = A11yOverrides::from_props(&props).unwrap();
+        assert!(overrides.orientation.is_none());
+    }
+
+    #[test]
+    fn parse_orientation_mapping() {
+        assert_eq!(
+            parse_orientation("horizontal"),
+            Some(accessible::Orientation::Horizontal)
+        );
+        assert_eq!(
+            parse_orientation("vertical"),
+            Some(accessible::Orientation::Vertical)
+        );
+        assert_eq!(parse_orientation("diagonal"), None);
+        assert_eq!(parse_orientation(""), None);
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_toggled() {
+        let overrides = A11yOverrides {
+            toggled: Some(true),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_selected() {
+        let overrides = A11yOverrides {
+            selected: Some(false),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_value() {
+        let overrides = A11yOverrides {
+            value: Some("test".to_string()),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
+    }
+
+    #[test]
+    fn has_accessible_overrides_true_for_orientation() {
+        let overrides = A11yOverrides {
+            orientation: Some(accessible::Orientation::Horizontal),
+            ..A11yOverrides::default()
+        };
+        assert!(overrides.has_accessible_overrides());
     }
 }
