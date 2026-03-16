@@ -218,6 +218,12 @@ pub(crate) fn render_image<'a>(
     if let Some(scale) = prop_f32(props, "scale") {
         img = img.scale(scale);
     }
+    if let Some(alt) = prop_str(props, "alt") {
+        img = img.alt(alt);
+    }
+    if let Some(desc) = prop_str(props, "description") {
+        img = img.description(desc);
+    }
     // crop: {"x": u32, "y": u32, "width": u32, "height": u32}
     if let Some(crop_obj) = props
         .and_then(|p| p.get("crop"))
@@ -263,6 +269,12 @@ pub(crate) fn render_svg<'a>(node: &'a TreeNode) -> Element<'a, Message> {
     }
     if let Some(o) = prop_f32(props, "opacity") {
         s = s.opacity(o);
+    }
+    if let Some(alt) = prop_str(props, "alt") {
+        s = s.alt(alt);
+    }
+    if let Some(desc) = prop_str(props, "description") {
+        s = s.description(desc);
     }
     if let Some(color_str) = prop_str(props, "color")
         && let Some(c) = crate::theming::parse_hex_color(&color_str)

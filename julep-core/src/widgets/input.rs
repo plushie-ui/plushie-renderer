@@ -1338,6 +1338,9 @@ pub(crate) fn render_combo_box<'a>(
     if let Some(lh) = parse_line_height(props) {
         cb = cb.line_height(lh);
     }
+    if let Some(shaping) = parse_shaping(props) {
+        cb = cb.shaping(shaping);
+    }
     if let Some(mh) = prop_f32(props, "menu_height") {
         cb = cb.menu_height(mh);
     }
