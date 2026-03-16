@@ -500,9 +500,26 @@ impl OutgoingEvent {
         }
     }
 
-    pub fn pane_dragged(id: String, pane: String, target: String) -> Self {
+    pub fn pane_dragged(
+        id: String,
+        kind: &str,
+        pane: String,
+        target: Option<String>,
+        region: Option<&str>,
+        edge: Option<&str>,
+    ) -> Self {
+        let mut data = serde_json::json!({"kind": kind, "pane": pane});
+        if let Some(t) = target {
+            data["target"] = serde_json::json!(t);
+        }
+        if let Some(r) = region {
+            data["region"] = serde_json::json!(r);
+        }
+        if let Some(e) = edge {
+            data["edge"] = serde_json::json!(e);
+        }
         Self {
-            data: Some(serde_json::json!({"pane": pane, "target": target})),
+            data: Some(data),
             ..Self::bare("pane_dragged", id)
         }
     }
@@ -511,6 +528,13 @@ impl OutgoingEvent {
         Self {
             data: Some(serde_json::json!({"pane": pane})),
             ..Self::bare("pane_clicked", id)
+        }
+    }
+
+    pub fn pane_focus_cycle(id: String, pane: String) -> Self {
+        Self {
+            data: Some(serde_json::json!({"pane": pane})),
+            ..Self::bare("pane_focus_cycle", id)
         }
     }
 

@@ -320,18 +320,20 @@ pub(crate) fn render_themer<'a>(
     theme: &'a iced::Theme,
     dispatcher: &'a ExtensionDispatcher,
 ) -> Element<'a, Message> {
-    let props = node.props.as_object();
-    let resolved_theme: Option<iced::Theme> = props
-        .and_then(|p| p.get("theme"))
-        .and_then(crate::theming::resolve_theme_only);
+    // The resolved theme lives in caches.themer_themes (populated by
+    // ensure_caches) so we can borrow it with lifetime 'a for child rendering.
+    let cached_theme = caches.themer_themes.get(&node.id);
+    let child_theme = cached_theme.unwrap_or(theme);
 
     let child: Element<'a, Message> = node
         .children
         .first()
-        .map(|c| super::render(c, caches, images, theme, dispatcher))
+        .map(|c| super::render(c, caches, images, child_theme, dispatcher))
         .unwrap_or_else(|| Space::new().into());
 
-    iced::widget::Themer::new(resolved_theme, child).into()
+    // Clone the cached theme into an owned Option for the Themer wrapper.
+    let themer_theme = cached_theme.cloned();
+    iced::widget::Themer::new(themer_theme, child).into()
 }
 
 // ---------------------------------------------------------------------------

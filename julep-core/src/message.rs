@@ -119,6 +119,8 @@ pub enum Message {
     PaneDragged(String, iced::widget::pane_grid::DragEvent),
     /// PaneGrid pane was clicked (grid_id, pane).
     PaneClicked(String, iced::widget::pane_grid::Pane),
+    /// PaneGrid focus cycle via F6 (grid_id, target_pane).
+    PaneFocusCycle(String, iced::widget::pane_grid::Pane),
     /// Scrollable viewport changed (id, viewport data).
     ScrollEvent(String, f32, f32, f32, f32, f32, f32, f32, f32),
     /// Text was pasted into a text_input (id, pasted_text).

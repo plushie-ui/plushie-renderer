@@ -27,11 +27,14 @@ impl App {
                 }
 
                 let win_settings = parse_window_settings(settings);
+                let initial_decorations = win_settings.decorations;
                 let (iced_id, open_task) = window::open(win_settings);
 
                 self.window_map.insert(window_id.to_string(), iced_id);
                 self.reverse_window_map
                     .insert(iced_id, window_id.to_string());
+                self.decoration_state
+                    .insert(window_id.to_string(), initial_decorations);
 
                 let julep_id = window_id.to_string();
                 open_task.map(move |id| Message::WindowOpened(id, julep_id.clone()))
@@ -39,6 +42,7 @@ impl App {
             "close" => {
                 if let Some(iced_id) = self.window_map.remove(window_id) {
                     self.reverse_window_map.remove(&iced_id);
+                    self.decoration_state.remove(window_id);
                     window::close(iced_id)
                 } else {
                     log::warn!("window_op close: unknown window_id: {window_id}");
@@ -107,11 +111,16 @@ impl App {
                             );
                             tasks.push(window::set_level(iced_id, level));
                         }
-                        if obj.contains_key("decorations") {
-                            // WARNING: iced only exposes toggle_decorations(), not set_decorations().
-                            // This means sending decorations=true when already true will turn them OFF.
-                            // Callers must track their own state and only send when they want to change.
-                            tasks.push(window::toggle_decorations(iced_id));
+                        if let Some(desired) = obj.get("decorations").and_then(|v| v.as_bool()) {
+                            let current = self
+                                .decoration_state
+                                .get(window_id)
+                                .copied()
+                                .unwrap_or(true);
+                            if desired != current {
+                                self.decoration_state.insert(window_id.to_string(), desired);
+                                tasks.push(window::toggle_decorations(iced_id));
+                            }
                         }
                     }
 
@@ -184,6 +193,13 @@ impl App {
             }
             "toggle_decorations" => {
                 if let Some(&iced_id) = self.window_map.get(window_id) {
+                    let current = self
+                        .decoration_state
+                        .get(window_id)
+                        .copied()
+                        .unwrap_or(true);
+                    self.decoration_state
+                        .insert(window_id.to_string(), !current);
                     window::toggle_decorations(iced_id)
                 } else {
                     Task::none()
@@ -668,9 +684,12 @@ impl App {
         for win_id in &tree_windows {
             if !open_windows.contains(win_id) {
                 let settings = self.window_settings_for(win_id);
+                let initial_decorations = settings.decorations;
                 let (iced_id, open_task) = window::open(settings);
                 self.window_map.insert(win_id.clone(), iced_id);
                 self.reverse_window_map.insert(iced_id, win_id.clone());
+                self.decoration_state
+                    .insert(win_id.clone(), initial_decorations);
 
                 let julep_id = win_id.clone();
                 tasks.push(open_task.map(move |id| Message::WindowOpened(id, julep_id.clone())));
@@ -683,6 +702,7 @@ impl App {
                 && let Some(iced_id) = self.window_map.remove(win_id)
             {
                 self.reverse_window_map.remove(&iced_id);
+                self.decoration_state.remove(win_id.as_str());
                 tasks.push(window::close(iced_id));
             }
         }

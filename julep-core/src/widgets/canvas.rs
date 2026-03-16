@@ -629,7 +629,24 @@ fn draw_canvas_shape(
                     iced::widget::image::Handle::from_path(path)
                 }
             };
-            frame.draw_image(bounds, &handle);
+            let rotation = shape
+                .get("rotation")
+                .and_then(|v| v.as_f64())
+                .map(|r| Radians(r as f32))
+                .unwrap_or(Radians(0.0));
+            let opacity = shape
+                .get("opacity")
+                .and_then(|v| v.as_f64())
+                .map(|o| o as f32)
+                .unwrap_or(1.0);
+            let img = iced::advanced::image::Image {
+                handle,
+                filter_method: iced::advanced::image::FilterMethod::default(),
+                rotation,
+                border_radius: Default::default(),
+                opacity,
+            };
+            frame.draw_image(bounds, img);
         }
         "svg" => {
             let source = shape.get("source").and_then(|v| v.as_str()).unwrap_or("");

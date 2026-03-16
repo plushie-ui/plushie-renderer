@@ -582,19 +582,19 @@ pub(crate) fn render_pane_grid<'a>(
         None => return text("(pane_grid: no state)").into(),
     };
 
-    // Pre-render children into a map keyed by julep ID. This avoids
-    // lifetime issues with the PaneGrid closure borrowing both `node`
-    // and `caches` simultaneously.
-    let child_map: HashMap<String, Element<'a, Message>> = node
-        .children
-        .iter()
-        .map(|c| {
-            (
-                c.id.clone(),
-                super::render(c, caches, images, theme, dispatcher),
-            )
-        })
-        .collect();
+    // Pre-render children into a map keyed by julep ID. Also extract
+    // title props from child nodes before the closure consumes the elements.
+    let mut child_map: HashMap<String, Element<'a, Message>> = HashMap::new();
+    let mut title_map: HashMap<String, String> = HashMap::new();
+    for c in &node.children {
+        child_map.insert(
+            c.id.clone(),
+            super::render(c, caches, images, theme, dispatcher),
+        );
+        if let Some(title) = prop_str(c.props.as_object(), "title") {
+            title_map.insert(c.id.clone(), title);
+        }
+    }
 
     // We need to move child_map into the closure but PaneGrid::new
     // requires FnMut, so use a RefCell to allow mutation.
@@ -603,26 +603,34 @@ pub(crate) fn render_pane_grid<'a>(
     let node_id = node.id.clone();
     let node_id2 = node.id.clone();
     let node_id3 = node.id.clone();
+    let node_id4 = node.id.clone();
 
     let mut pg = pane_grid::PaneGrid::new(state, |_pane, pane_id, _is_maximized| {
         let child_element: Element<'a, Message> = child_map
             .borrow_mut()
             .remove(pane_id)
             .unwrap_or_else(|| text(format!("(pane: {})", pane_id)).into());
-        let title_bar = pane_grid::TitleBar::new(text(pane_id.clone()).size(12.0));
-        pane_grid::Content::new(child_element).title_bar(title_bar)
+        let content = pane_grid::Content::new(child_element);
+        if let Some(title_text) = title_map.get(pane_id) {
+            let title_bar = pane_grid::TitleBar::new(text(title_text.clone()).size(14.0));
+            content.title_bar(title_bar)
+        } else {
+            content
+        }
     })
     .width(width)
     .height(height)
     .spacing(spacing);
 
     let min_size = prop_f32(props, "min_size").unwrap_or(10.0);
+    let leeway = prop_f32(props, "leeway").unwrap_or(min_size);
 
     pg = pg.on_click(move |pane| Message::PaneClicked(node_id3.clone(), pane));
-    pg = pg.on_resize(min_size, move |evt| {
+    pg = pg.on_resize(leeway, move |evt| {
         Message::PaneResized(node_id.clone(), evt)
     });
     pg = pg.on_drag(move |evt| Message::PaneDragged(node_id2.clone(), evt));
+    pg = pg.on_focus_cycle(move |pane| Message::PaneFocusCycle(node_id4.clone(), pane));
 
     // Divider styling
     let divider_color = prop_color(props, "divider_color");

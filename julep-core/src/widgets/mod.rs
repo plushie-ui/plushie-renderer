@@ -64,6 +64,9 @@ pub struct WidgetCaches {
     pub(crate) canvas_caches: HashMap<String, HashMap<String, (u64, iced_canvas::Cache)>>,
     /// Per-qr_code caches. Key is node ID, value is (content hash, canvas Cache).
     pub(crate) qr_code_caches: HashMap<String, (u64, iced_canvas::Cache)>,
+    /// Resolved themes for Themer widget nodes. Populated in ensure_caches()
+    /// so render_themer() can borrow them with the correct lifetime.
+    pub(crate) themer_themes: HashMap<String, iced::Theme>,
     pub(crate) default_text_size: Option<f32>,
     pub(crate) default_font: Option<Font>,
     pub extension: crate::extensions::ExtensionCaches,
@@ -86,6 +89,7 @@ impl WidgetCaches {
             pane_grid_states: HashMap::new(),
             canvas_caches: HashMap::new(),
             qr_code_caches: HashMap::new(),
+            themer_themes: HashMap::new(),
             default_text_size: None,
             default_font: None,
             extension: crate::extensions::ExtensionCaches::new(),
@@ -130,6 +134,7 @@ impl WidgetCaches {
         self.pane_grid_states.clear();
         self.canvas_caches.clear();
         self.qr_code_caches.clear();
+        self.themer_themes.clear();
     }
 }
 
@@ -302,6 +307,18 @@ fn ensure_caches_walk(
             // Remove stale layers that are no longer in the tree.
             node_caches.retain(|name, _| layer_map.contains_key(name));
         }
+        "themer" => {
+            let props = node.props.as_object();
+            if let Some(resolved) = props
+                .and_then(|p| p.get("theme"))
+                .and_then(crate::theming::resolve_theme_only)
+            {
+                caches.themer_themes.insert(node.id.clone(), resolved);
+            } else {
+                // No valid theme prop -- remove stale cache entry if present.
+                caches.themer_themes.remove(&node.id);
+            }
+        }
         "qr_code" => {
             let props = node.props.as_object();
             let data = prop_str(props, "data").unwrap_or_default();
@@ -351,6 +368,7 @@ fn prune_all_stale_caches(live_ids: &HashSet<String>, caches: &mut WidgetCaches)
         .retain(|id, _| live_ids.contains(id));
     caches.canvas_caches.retain(|id, _| live_ids.contains(id));
     caches.qr_code_caches.retain(|id, _| live_ids.contains(id));
+    caches.themer_themes.retain(|id, _| live_ids.contains(id));
 }
 
 // ---------------------------------------------------------------------------

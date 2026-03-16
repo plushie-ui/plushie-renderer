@@ -224,6 +224,24 @@ impl App {
                 }
                 Task::none()
             }
+            "list_images" => {
+                let tag = payload
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list_images")
+                    .to_string();
+                let handles: Vec<String> = self.image_registry.handle_names();
+                super::emitters::emit_query_response(
+                    "image_list",
+                    &tag,
+                    serde_json::json!({"handles": handles}),
+                );
+                Task::none()
+            }
+            "clear_images" => {
+                self.image_registry.clear();
+                Task::none()
+            }
             other => {
                 log::warn!("unknown widget_op: {other}");
                 Task::none()

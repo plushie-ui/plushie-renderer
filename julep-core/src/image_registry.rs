@@ -131,6 +131,16 @@ impl ImageRegistry {
     pub fn get(&self, name: &str) -> Option<&image::Handle> {
         self.handles.get(name)
     }
+
+    /// Return the names of all registered image handles.
+    pub fn handle_names(&self) -> Vec<String> {
+        self.handles.keys().cloned().collect()
+    }
+
+    /// Remove all registered image handles.
+    pub fn clear(&mut self) {
+        self.handles.clear();
+    }
 }
 
 #[cfg(test)]

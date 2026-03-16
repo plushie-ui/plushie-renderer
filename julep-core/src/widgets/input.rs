@@ -389,7 +389,7 @@ pub(crate) fn render_text_editor<'a>(
                 let obj = rule.as_object()?;
                 let key = obj.get("key").and_then(|v| v.as_str()).map(str::to_owned);
                 let named = obj.get("named").and_then(|v| v.as_str()).map(str::to_owned);
-                let modifiers = obj
+                let modifiers: Vec<String> = obj
                     .get("modifiers")
                     .and_then(|v| v.as_array())
                     .map(|arr| {
@@ -398,8 +398,33 @@ pub(crate) fn render_text_editor<'a>(
                             .collect()
                     })
                     .unwrap_or_default();
+                if key.is_none() && named.is_none() {
+                    // Catch-all rules (no key/named) are valid but log a
+                    // hint if it looks accidental (has modifiers but no key).
+                    if !modifiers.is_empty() {
+                        log::warn!(
+                            "text_editor key_binding rule has modifiers but no `key` or `named` -- \
+                             this will match ANY key with those modifiers [id={}]",
+                            node.id
+                        );
+                    }
+                }
                 let binding_val = obj.get("binding").cloned().unwrap_or(Value::Null);
                 let is_default = binding_val.as_str() == Some("default");
+                // Validate binding action name
+                if let Some(action_name) = binding_val.as_str() {
+                    match action_name {
+                        "default" | "copy" | "cut" | "paste" | "select_all" | "enter"
+                        | "backspace" | "delete" | "unfocus" | "select_word" | "select_line" => {}
+                        other => {
+                            log::warn!(
+                                "text_editor key_binding: unrecognized binding action {:?} [id={}]",
+                                other,
+                                node.id,
+                            );
+                        }
+                    }
+                }
                 Some(KeyRule {
                     key,
                     named,

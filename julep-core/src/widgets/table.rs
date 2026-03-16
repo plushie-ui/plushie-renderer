@@ -64,6 +64,11 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
     let header_text_size = prop_f32(props, "header_text_size").unwrap_or(14.0);
     let row_text_size = prop_f32(props, "row_text_size").unwrap_or(13.0);
 
+    let cell_spacing = prop_f32(props, "cell_spacing").unwrap_or(4.0);
+    let row_spacing = prop_f32(props, "row_spacing").unwrap_or(2.0);
+    let separator_thickness = prop_f32(props, "separator_thickness").unwrap_or(1.0);
+    let separator_color = prop_color(props, "separator_color");
+
     let sort_by = prop_str(props, "sort_by");
     let sort_order = prop_str(props, "sort_order");
 
@@ -123,13 +128,25 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                 }
             })
             .collect();
-        let header = row(header_cells).spacing(4.0).width(Fill);
+        let header = row(header_cells).spacing(cell_spacing).width(Fill);
         table_rows.push(header.into());
 
         // Separator
         let show_separator = prop_bool_default(props, "separator", true);
         if show_separator {
-            table_rows.push(rule::horizontal(1).into());
+            let sep: Element<'a, Message> = if let Some(sep_col) = separator_color {
+                rule::horizontal(separator_thickness)
+                    .style(move |_theme: &iced::Theme| rule::Style {
+                        color: sep_col,
+                        radius: Default::default(),
+                        fill_mode: rule::FillMode::Full,
+                        snap: true,
+                    })
+                    .into()
+            } else {
+                rule::horizontal(separator_thickness).into()
+            };
+            table_rows.push(sep);
         }
     }
 
@@ -151,12 +168,12 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                     .into()
             })
             .collect();
-        table_rows.push(row(cells).spacing(4.0).width(Fill).into());
+        table_rows.push(row(cells).spacing(cell_spacing).width(Fill).into());
     }
 
     scrollable(
         column(table_rows)
-            .spacing(2.0)
+            .spacing(row_spacing)
             .width(width)
             .padding(padding_val),
     )

@@ -56,6 +56,10 @@ struct App {
     /// Per-window resolved theme cache. Populated during apply() when the tree
     /// changes (mutable context), read during theme_for_window() (immutable).
     window_theme_cache: HashMap<String, Theme>,
+    /// Per-window decoration state. iced only exposes toggle_decorations(),
+    /// so we track the current boolean to avoid toggling when already in the
+    /// desired state. Defaults to true (decorated) when a window opens.
+    decoration_state: HashMap<String, bool>,
 }
 
 impl App {
@@ -77,6 +81,7 @@ impl App {
             last_slide_values: HashMap::new(),
             dispatcher,
             window_theme_cache: HashMap::new(),
+            decoration_state: HashMap::new(),
         }
     }
 
@@ -93,15 +98,22 @@ impl App {
     }
 
     fn theme_for_window(&self, window_id: window::Id) -> Theme {
+        self.theme_ref_for_window(window_id).clone()
+    }
+
+    /// Like theme_for_window but returns a borrowed reference, avoiding a
+    /// clone when the caller needs a &Theme with the same lifetime as &self
+    /// (e.g. view_window where the returned Element borrows from &self).
+    fn theme_ref_for_window(&self, window_id: window::Id) -> &Theme {
         if let Some(julep_id) = self.reverse_window_map.get(&window_id)
             && let Some(cached) = self.window_theme_cache.get(julep_id)
         {
-            return cached.clone();
+            return cached;
         }
         if self.theme_follows_system {
-            self.system_theme.clone()
+            &self.system_theme
         } else {
-            self.theme.clone()
+            &self.theme
         }
     }
 
@@ -295,6 +307,8 @@ impl App {
             Message::WindowClosed(window_id) => {
                 if let Some(julep_id) = self.reverse_window_map.remove(&window_id) {
                     self.window_map.remove(&julep_id);
+                    self.window_theme_cache.remove(&julep_id);
+                    self.decoration_state.remove(&julep_id);
                     if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
                         emit_event(OutgoingEvent::window_closed(tag.clone(), julep_id.clone()));
                     }
@@ -373,6 +387,13 @@ impl App {
             Message::PaneResized(grid_id, evt) => self.handle_pane_resized(grid_id, evt),
             Message::PaneDragged(grid_id, evt) => self.handle_pane_dragged(grid_id, evt),
             Message::PaneClicked(grid_id, pane) => self.handle_pane_clicked(grid_id, pane),
+            Message::PaneFocusCycle(grid_id, pane) => {
+                if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
+                    let pane_id = state.get(pane).cloned().unwrap_or_default();
+                    emit_event(OutgoingEvent::pane_focus_cycle(grid_id, pane_id));
+                }
+                Task::none()
+            }
             Message::ScrollEvent(
                 id,
                 abs_x,
@@ -476,6 +497,7 @@ impl App {
                             self.last_slide_values.clear();
                             self.pending_tasks.clear();
                             self.window_theme_cache.clear();
+                            self.decoration_state.clear();
 
                             return Task::batch(close_tasks);
                         }
@@ -775,6 +797,13 @@ impl App {
 
     fn handle_window_event(&self, iced_id: window::Id, evt: window::Event) -> Task<Message> {
         let julep_id = self.julep_id_for(&iced_id);
+        if julep_id.is_empty() {
+            log::warn!(
+                "received window event for unknown iced window {:?}, skipping emission",
+                iced_id
+            );
+            return Task::none();
+        }
         match evt {
             window::Event::Opened { position, size } => {
                 if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
@@ -929,17 +958,59 @@ impl App {
     }
 
     fn handle_pane_dragged(&mut self, grid_id: String, evt: pane_grid::DragEvent) -> Task<Message> {
-        if let pane_grid::DragEvent::Dropped { pane, target } = evt
-            && let Some(state) = self.core.caches.pane_grid_state_mut(&grid_id)
-        {
-            // Look up julep IDs for the panes before swapping
-            let pane_id = state.get(pane).cloned().unwrap_or_default();
-            let target_pane = match target {
-                pane_grid::Target::Edge(_) => "edge".to_string(),
-                pane_grid::Target::Pane(p, _) => state.get(p).cloned().unwrap_or_default(),
-            };
-            state.drop(pane, target);
-            emit_event(OutgoingEvent::pane_dragged(grid_id, pane_id, target_pane));
+        match evt {
+            pane_grid::DragEvent::Picked { pane } => {
+                if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
+                    let pane_id = state.get(pane).cloned().unwrap_or_default();
+                    emit_event(OutgoingEvent::pane_dragged(
+                        grid_id, "picked", pane_id, None, None, None,
+                    ));
+                }
+            }
+            pane_grid::DragEvent::Dropped { pane, target } => {
+                if let Some(state) = self.core.caches.pane_grid_state_mut(&grid_id) {
+                    let pane_id = state.get(pane).cloned().unwrap_or_default();
+                    let (target_pane, region, edge) = match target {
+                        pane_grid::Target::Edge(e) => {
+                            let edge_str = match e {
+                                pane_grid::Edge::Top => "top",
+                                pane_grid::Edge::Bottom => "bottom",
+                                pane_grid::Edge::Left => "left",
+                                pane_grid::Edge::Right => "right",
+                            };
+                            (None, None, Some(edge_str))
+                        }
+                        pane_grid::Target::Pane(p, region) => {
+                            let target_id = state.get(p).cloned().unwrap_or_default();
+                            let region_str = match region {
+                                pane_grid::Region::Center => "center",
+                                pane_grid::Region::Edge(pane_grid::Edge::Top) => "top",
+                                pane_grid::Region::Edge(pane_grid::Edge::Bottom) => "bottom",
+                                pane_grid::Region::Edge(pane_grid::Edge::Left) => "left",
+                                pane_grid::Region::Edge(pane_grid::Edge::Right) => "right",
+                            };
+                            (Some(target_id), Some(region_str), None)
+                        }
+                    };
+                    state.drop(pane, target);
+                    emit_event(OutgoingEvent::pane_dragged(
+                        grid_id,
+                        "dropped",
+                        pane_id,
+                        target_pane,
+                        region,
+                        edge,
+                    ));
+                }
+            }
+            pane_grid::DragEvent::Canceled { pane } => {
+                if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
+                    let pane_id = state.get(pane).cloned().unwrap_or_default();
+                    emit_event(OutgoingEvent::pane_dragged(
+                        grid_id, "canceled", pane_id, None, None, None,
+                    ));
+                }
+            }
         }
         Task::none()
     }
@@ -964,12 +1035,14 @@ impl App {
             }
         };
 
+        let resolved_theme = self.theme_ref_for_window(window_id);
+
         match self.core.tree.find_window(julep_id) {
             Some(window_node) => julep_core::widgets::render(
                 window_node,
                 &self.core.caches,
                 &self.image_registry,
-                &self.theme,
+                resolved_theme,
                 &self.dispatcher,
             ),
             None => container(text("waiting for snapshot..."))

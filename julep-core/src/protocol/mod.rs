@@ -1340,16 +1340,59 @@ mod tests {
     }
 
     #[test]
-    fn serialize_pane_dragged() {
+    fn serialize_pane_dragged_dropped() {
         let evt = OutgoingEvent::pane_dragged(
             "pg1".to_string(),
+            "dropped",
             "pane_a".to_string(),
-            "pane_b".to_string(),
+            Some("pane_b".to_string()),
+            Some("center"),
+            None,
         );
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "pane_dragged");
+        assert_eq!(json["data"]["kind"], "dropped");
         assert_eq!(json["data"]["pane"], "pane_a");
         assert_eq!(json["data"]["target"], "pane_b");
+        assert_eq!(json["data"]["region"], "center");
+    }
+
+    #[test]
+    fn serialize_pane_dragged_picked() {
+        let evt = OutgoingEvent::pane_dragged(
+            "pg1".to_string(),
+            "picked",
+            "pane_a".to_string(),
+            None,
+            None,
+            None,
+        );
+        let json = serde_json::to_value(&evt).unwrap();
+        assert_eq!(json["data"]["kind"], "picked");
+        assert_eq!(json["data"]["pane"], "pane_a");
+        assert!(json["data"].get("target").is_none());
+    }
+
+    #[test]
+    fn serialize_pane_dragged_canceled() {
+        let evt = OutgoingEvent::pane_dragged(
+            "pg1".to_string(),
+            "canceled",
+            "pane_a".to_string(),
+            None,
+            None,
+            None,
+        );
+        let json = serde_json::to_value(&evt).unwrap();
+        assert_eq!(json["data"]["kind"], "canceled");
+    }
+
+    #[test]
+    fn serialize_pane_focus_cycle() {
+        let evt = OutgoingEvent::pane_focus_cycle("pg1".to_string(), "pane_a".to_string());
+        let json = serde_json::to_value(&evt).unwrap();
+        assert_eq!(json["family"], "pane_focus_cycle");
+        assert_eq!(json["data"]["pane"], "pane_a");
     }
 
     #[test]
