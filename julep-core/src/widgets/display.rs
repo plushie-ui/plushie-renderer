@@ -66,7 +66,14 @@ pub(crate) fn render_text<'a>(
             "success" => t.style(text::success),
             "danger" => t.style(text::danger),
             "warning" => t.style(text::warning),
-            _ => t.style(text::default),
+            _ => {
+                log::warn!(
+                    "unknown style {:?} for widget type {:?}, using default",
+                    style_name,
+                    "text"
+                );
+                t.style(text::default)
+            }
         };
     }
 
@@ -364,7 +371,14 @@ pub(crate) fn render_progress_bar<'a>(node: &'a TreeNode) -> Element<'a, Message
                 "success" => pb.style(progress_bar::success),
                 "danger" => pb.style(progress_bar::danger),
                 "warning" => pb.style(progress_bar::warning),
-                _ => pb.style(progress_bar::primary),
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "progress_bar"
+                    );
+                    pb.style(progress_bar::primary)
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -405,7 +419,14 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                 r = match style_name {
                     "default" => r.style(rule::default),
                     "weak" => r.style(rule::weak),
-                    _ => r,
+                    _ => {
+                        log::warn!(
+                            "unknown style {:?} for widget type {:?}, using default",
+                            style_name,
+                            "rule"
+                        );
+                        r
+                    }
                 };
             } else if let Some(obj) = style_val.as_object() {
                 let ov = parse_style_overrides(obj);
@@ -422,7 +443,14 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                 r = match style_name {
                     "default" => r.style(rule::default),
                     "weak" => r.style(rule::weak),
-                    _ => r,
+                    _ => {
+                        log::warn!(
+                            "unknown style {:?} for widget type {:?}, using default",
+                            style_name,
+                            "rule"
+                        );
+                        r
+                    }
                 };
             } else if let Some(obj) = style_val.as_object() {
                 let ov = parse_style_overrides(obj);

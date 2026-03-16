@@ -273,19 +273,46 @@ pub(crate) fn parse_interaction(s: &str) -> Option<mouse::Interaction> {
 
 pub(crate) fn parse_hex_color(s: &str) -> Option<Color> {
     let s = s.strip_prefix('#').unwrap_or(s);
-    if s.len() == 6 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        Some(Color::from_rgb8(r, g, b))
-    } else if s.len() == 8 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        let a = u8::from_str_radix(&s[6..8], 16).ok()?;
-        Some(Color::from_rgba8(r, g, b, a as f32 / 255.0))
-    } else {
-        None
+    match s.len() {
+        3 => {
+            // #rgb -> #rrggbb
+            let mut expanded = String::with_capacity(6);
+            for c in s.chars() {
+                expanded.push(c);
+                expanded.push(c);
+            }
+            let r = u8::from_str_radix(&expanded[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&expanded[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&expanded[4..6], 16).ok()?;
+            Some(Color::from_rgb8(r, g, b))
+        }
+        4 => {
+            // #rgba -> #rrggbbaa
+            let mut expanded = String::with_capacity(8);
+            for c in s.chars() {
+                expanded.push(c);
+                expanded.push(c);
+            }
+            let r = u8::from_str_radix(&expanded[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&expanded[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&expanded[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&expanded[6..8], 16).ok()?;
+            Some(Color::from_rgba8(r, g, b, a as f32 / 255.0))
+        }
+        6 => {
+            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+            Some(Color::from_rgb8(r, g, b))
+        }
+        8 => {
+            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&s[6..8], 16).ok()?;
+            Some(Color::from_rgba8(r, g, b, a as f32 / 255.0))
+        }
+        _ => None,
     }
 }
 
@@ -644,14 +671,17 @@ pub(crate) fn parse_style_overrides(obj: &serde_json::Map<String, Value>) -> Sty
     }
 }
 
-/// Auto-derive hover background by darkening the base background to 90%.
+/// Auto-derive hover background. Lightens dark colors, darkens light colors.
 pub(crate) fn auto_derive_hover_bg(bg: Option<iced::Background>) -> Option<iced::Background> {
-    bg.map(|b| darken_background(b, 0.9))
+    bg.map(|b| deviate_background(b, 0.1))
 }
 
 /// Auto-derive disabled background by reducing alpha to 50%.
 pub(crate) fn auto_derive_disabled_bg(bg: Option<iced::Background>) -> Option<iced::Background> {
-    bg.map(|b| alpha_background(b, 0.5))
+    bg.map(|b| match b {
+        iced::Background::Color(c) => iced::Background::Color(alpha_color(c, 0.5)),
+        iced::Background::Gradient(g) => iced::Background::Gradient(alpha_gradient(g, 0.5)),
+    })
 }
 
 /// Auto-derive disabled text color by reducing alpha to 50%.
@@ -819,15 +849,6 @@ pub(crate) fn container_style_from_base(base: &StyleMapFields) -> container::Sty
     style
 }
 
-pub(crate) fn darken_color(color: Color, factor: f32) -> Color {
-    Color {
-        r: color.r * factor,
-        g: color.g * factor,
-        b: color.b * factor,
-        a: color.a,
-    }
-}
-
 pub(crate) fn alpha_color(color: Color, alpha: f32) -> Color {
     Color {
         r: color.r,
@@ -837,17 +858,54 @@ pub(crate) fn alpha_color(color: Color, alpha: f32) -> Color {
     }
 }
 
-pub(crate) fn darken_background(bg: iced::Background, factor: f32) -> iced::Background {
-    match bg {
-        iced::Background::Color(c) => iced::Background::Color(darken_color(c, factor)),
-        other => other,
+/// Lighten dark colors, darken light colors by the given amount.
+pub(crate) fn deviate_color(color: Color, amount: f32) -> Color {
+    let luminance = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+    if luminance > 0.5 {
+        // Light color: darken
+        Color {
+            r: (color.r - amount).max(0.0),
+            g: (color.g - amount).max(0.0),
+            b: (color.b - amount).max(0.0),
+            a: color.a,
+        }
+    } else {
+        // Dark color: lighten
+        Color {
+            r: (color.r + amount).min(1.0),
+            g: (color.g + amount).min(1.0),
+            b: (color.b + amount).min(1.0),
+            a: color.a,
+        }
     }
 }
 
-pub(crate) fn alpha_background(bg: iced::Background, alpha: f32) -> iced::Background {
+pub(crate) fn deviate_background(bg: iced::Background, amount: f32) -> iced::Background {
     match bg {
-        iced::Background::Color(c) => iced::Background::Color(alpha_color(c, alpha)),
-        other => other,
+        iced::Background::Color(c) => iced::Background::Color(deviate_color(c, amount)),
+        iced::Background::Gradient(g) => iced::Background::Gradient(deviate_gradient(g, amount)),
+    }
+}
+
+pub(crate) fn deviate_gradient(gradient: iced::Gradient, amount: f32) -> iced::Gradient {
+    match gradient {
+        iced::Gradient::Linear(mut linear) => {
+            for stop in linear.stops.iter_mut().flatten() {
+                stop.color = deviate_color(stop.color, amount);
+            }
+            iced::Gradient::Linear(linear)
+        }
+    }
+}
+
+pub(crate) fn alpha_gradient(gradient: iced::Gradient, alpha: f32) -> iced::Gradient {
+    match gradient {
+        iced::Gradient::Linear(mut linear) => {
+            for stop in linear.stops.iter_mut().flatten() {
+                stop.color = alpha_color(stop.color, alpha);
+            }
+            iced::Gradient::Linear(linear)
+        }
     }
 }
 
@@ -1331,21 +1389,35 @@ mod tests {
     }
 
     #[test]
-    fn style_map_auto_derive_hover() {
-        // darken_background multiplies RGB by factor (0.9), alpha unchanged.
+    fn style_map_auto_derive_hover_light() {
+        // Light color (luminance > 0.5) should darken by 0.1.
         let bg = Some(iced::Background::Color(Color::from_rgba(
-            1.0, 0.5, 0.0, 1.0,
+            1.0, 0.8, 0.6, 1.0,
         )));
         let result = auto_derive_hover_bg(bg);
         match result {
             Some(iced::Background::Color(c)) => {
-                // 1.0 * 0.9 = 0.9
                 assert!((c.r - 0.9).abs() < 0.001);
-                // 0.5 * 0.9 = 0.45
-                assert!((c.g - 0.45).abs() < 0.001);
-                // 0.0 * 0.9 = 0.0
-                assert!((c.b - 0.0).abs() < 0.001);
-                // alpha unchanged
+                assert!((c.g - 0.7).abs() < 0.001);
+                assert!((c.b - 0.5).abs() < 0.001);
+                assert!((c.a - 1.0).abs() < 0.001);
+            }
+            other => panic!("expected Background::Color, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn style_map_auto_derive_hover_dark() {
+        // Dark color (luminance <= 0.5) should lighten by 0.1.
+        let bg = Some(iced::Background::Color(Color::from_rgba(
+            0.1, 0.1, 0.1, 1.0,
+        )));
+        let result = auto_derive_hover_bg(bg);
+        match result {
+            Some(iced::Background::Color(c)) => {
+                assert!((c.r - 0.2).abs() < 0.001);
+                assert!((c.g - 0.2).abs() < 0.001);
+                assert!((c.b - 0.2).abs() < 0.001);
                 assert!((c.a - 1.0).abs() < 0.001);
             }
             other => panic!("expected Background::Color, got {other:?}"),
@@ -1354,7 +1426,7 @@ mod tests {
 
     #[test]
     fn style_map_auto_derive_disabled_bg() {
-        // alpha_background multiplies alpha by 0.5, RGB unchanged.
+        // Reduces alpha by 0.5, RGB unchanged.
         let bg = Some(iced::Background::Color(Color::from_rgba(
             0.8, 0.6, 0.4, 1.0,
         )));
@@ -1364,7 +1436,6 @@ mod tests {
                 assert!((c.r - 0.8).abs() < 0.001);
                 assert!((c.g - 0.6).abs() < 0.001);
                 assert!((c.b - 0.4).abs() < 0.001);
-                // 1.0 * 0.5 = 0.5
                 assert!((c.a - 0.5).abs() < 0.001);
             }
             other => panic!("expected Background::Color, got {other:?}"),

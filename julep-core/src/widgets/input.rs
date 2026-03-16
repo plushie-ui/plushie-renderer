@@ -72,7 +72,14 @@ pub(crate) fn render_text_input<'a>(
         if let Some(style_name) = style_val.as_str() {
             ti = match style_name {
                 "default" => ti.style(text_input::default),
-                _ => ti,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "text_input"
+                    );
+                    ti
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -88,17 +95,22 @@ pub(crate) fn render_text_input<'a>(
                     text_input::Status::Hovered => {
                         if let Some(ref f) = ov.hovered {
                             apply_text_input_fields(&mut style, f);
-                        } else if let iced::Background::Color(c) = style.background {
-                            style.background = iced::Background::Color(darken_color(c, 0.9));
+                        } else {
+                            style.background = deviate_background(style.background, 0.1);
                         }
                     }
                     text_input::Status::Disabled => {
                         if let Some(ref f) = ov.disabled {
                             apply_text_input_fields(&mut style, f);
                         } else {
-                            if let iced::Background::Color(c) = style.background {
-                                style.background = iced::Background::Color(alpha_color(c, 0.5));
-                            }
+                            style.background = match style.background {
+                                iced::Background::Color(c) => {
+                                    iced::Background::Color(alpha_color(c, 0.5))
+                                }
+                                iced::Background::Gradient(g) => {
+                                    iced::Background::Gradient(alpha_gradient(g, 0.5))
+                                }
+                            };
                             style.value = alpha_color(style.value, 0.5);
                         }
                     }
@@ -397,7 +409,14 @@ pub(crate) fn render_text_editor<'a>(
             if let Some(style_name) = style_val.as_str() {
                 match style_name {
                     "default" => Some(Box::new(text_editor::default)),
-                    _ => None,
+                    _ => {
+                        log::warn!(
+                            "unknown style {:?} for widget type {:?}, using default",
+                            style_name,
+                            "text_editor"
+                        );
+                        None
+                    }
                 }
             } else if let Some(obj) = style_val.as_object() {
                 let ov = parse_style_overrides(obj);
@@ -413,17 +432,22 @@ pub(crate) fn render_text_editor<'a>(
                         text_editor::Status::Hovered => {
                             if let Some(ref f) = ov.hovered {
                                 apply_text_editor_fields(&mut style, f);
-                            } else if let iced::Background::Color(c) = style.background {
-                                style.background = iced::Background::Color(darken_color(c, 0.9));
+                            } else {
+                                style.background = deviate_background(style.background, 0.1);
                             }
                         }
                         text_editor::Status::Disabled => {
                             if let Some(ref f) = ov.disabled {
                                 apply_text_editor_fields(&mut style, f);
                             } else {
-                                if let iced::Background::Color(c) = style.background {
-                                    style.background = iced::Background::Color(alpha_color(c, 0.5));
-                                }
+                                style.background = match style.background {
+                                    iced::Background::Color(c) => {
+                                        iced::Background::Color(alpha_color(c, 0.5))
+                                    }
+                                    iced::Background::Gradient(g) => {
+                                        iced::Background::Gradient(alpha_gradient(g, 0.5))
+                                    }
+                                };
                                 style.value = alpha_color(style.value, 0.5);
                             }
                         }
@@ -573,7 +597,14 @@ pub(crate) fn render_checkbox<'a>(
                 "secondary" => cb.style(checkbox::secondary),
                 "success" => cb.style(checkbox::success),
                 "danger" => cb.style(checkbox::danger),
-                _ => cb.style(checkbox::primary),
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "checkbox"
+                    );
+                    cb.style(checkbox::primary)
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -584,15 +615,22 @@ pub(crate) fn render_checkbox<'a>(
                     checkbox::Status::Hovered { .. } => {
                         if let Some(ref f) = ov.hovered {
                             apply_checkbox_fields(&mut style, f);
-                        } else if let iced::Background::Color(c) = style.background {
-                            style.background = iced::Background::Color(darken_color(c, 0.9));
+                        } else {
+                            style.background = deviate_background(style.background, 0.1);
                         }
                     }
                     checkbox::Status::Disabled { .. } => {
                         if let Some(ref f) = ov.disabled {
                             apply_checkbox_fields(&mut style, f);
                         } else {
-                            style.background = alpha_background(style.background, 0.5);
+                            style.background = match style.background {
+                                iced::Background::Color(c) => {
+                                    iced::Background::Color(alpha_color(c, 0.5))
+                                }
+                                iced::Background::Gradient(g) => {
+                                    iced::Background::Gradient(alpha_gradient(g, 0.5))
+                                }
+                            };
                             if let Some(tc) = style.text_color {
                                 style.text_color = Some(alpha_color(tc, 0.5));
                             }
@@ -672,7 +710,14 @@ pub(crate) fn render_toggler<'a>(
         if let Some(style_name) = style_val.as_str() {
             t = match style_name {
                 "default" => t.style(toggler::default),
-                _ => t,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "toggler"
+                    );
+                    t
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -684,14 +729,21 @@ pub(crate) fn render_toggler<'a>(
                         if let Some(ref f) = ov.hovered {
                             apply_toggler_fields(&mut style, f);
                         } else {
-                            style.background = darken_background(style.background, 0.9);
+                            style.background = deviate_background(style.background, 0.1);
                         }
                     }
                     toggler::Status::Disabled { .. } => {
                         if let Some(ref f) = ov.disabled {
                             apply_toggler_fields(&mut style, f);
                         } else {
-                            style.background = alpha_background(style.background, 0.5);
+                            style.background = match style.background {
+                                iced::Background::Color(c) => {
+                                    iced::Background::Color(alpha_color(c, 0.5))
+                                }
+                                iced::Background::Gradient(g) => {
+                                    iced::Background::Gradient(alpha_gradient(g, 0.5))
+                                }
+                            };
                             if let Some(tc) = style.text_color {
                                 style.text_color = Some(alpha_color(tc, 0.5));
                             }
@@ -775,7 +827,14 @@ pub(crate) fn render_radio<'a>(
         if let Some(style_name) = style_val.as_str() {
             r = match style_name {
                 "default" => r.style(iced::widget::radio::default),
-                _ => r,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "radio"
+                    );
+                    r
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -786,7 +845,7 @@ pub(crate) fn render_radio<'a>(
                     if let Some(ref f) = ov.hovered {
                         apply_radio_fields(&mut style, f);
                     } else {
-                        style.background = darken_background(style.background, 0.9);
+                        style.background = deviate_background(style.background, 0.1);
                     }
                 }
                 style
@@ -840,7 +899,14 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
         if let Some(style_name) = style_val.as_str() {
             s = match style_name {
                 "default" => s.style(slider::default),
-                _ => s,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "slider"
+                    );
+                    s
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -851,7 +917,7 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
                     if let Some(ref f) = ov.hovered {
                         apply_slider_handle_fields(&mut style.handle, f);
                     } else {
-                        style.handle.background = darken_background(style.handle.background, 0.9);
+                        style.handle.background = deviate_background(style.handle.background, 0.1);
                     }
                 }
                 style
@@ -899,7 +965,14 @@ pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Mess
         if let Some(style_name) = style_val.as_str() {
             s = match style_name {
                 "default" => s.style(vertical_slider::default),
-                _ => s,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "vertical_slider"
+                    );
+                    s
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -910,7 +983,7 @@ pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Mess
                     if let Some(ref f) = ov.hovered {
                         apply_slider_handle_fields(&mut style.handle, f);
                     } else {
-                        style.handle.background = darken_background(style.handle.background, 0.9);
+                        style.handle.background = deviate_background(style.handle.background, 0.1);
                     }
                 }
                 style
@@ -982,7 +1055,14 @@ pub(crate) fn render_pick_list<'a>(
         if let Some(style_name) = style_val.as_str() {
             pl = match style_name {
                 "default" => pl.style(pick_list::default),
-                _ => pl,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "pick_list"
+                    );
+                    pl
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -992,8 +1072,8 @@ pub(crate) fn render_pick_list<'a>(
                 if matches!(status, pick_list::Status::Hovered) {
                     if let Some(ref f) = ov.hovered {
                         apply_pick_list_fields(&mut style, f);
-                    } else if let iced::Background::Color(c) = style.background {
-                        style.background = iced::Background::Color(darken_color(c, 0.9));
+                    } else {
+                        style.background = deviate_background(style.background, 0.1);
                     }
                 }
                 style

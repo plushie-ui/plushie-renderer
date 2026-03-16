@@ -187,7 +187,14 @@ pub(crate) fn render_container<'a>(
                 "success" => c.style(container::success),
                 "danger" => c.style(container::danger),
                 "warning" => c.style(container::warning),
-                _ => c,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "container"
+                    );
+                    c
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);

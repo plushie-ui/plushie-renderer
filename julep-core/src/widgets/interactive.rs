@@ -54,7 +54,14 @@ pub(crate) fn render_button<'a>(
                 "warning" => b.style(button::warning),
                 "danger" => b.style(button::danger),
                 "text" => b.style(button::text),
-                _ => b.style(button::primary),
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "button"
+                    );
+                    b.style(button::primary)
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
@@ -270,7 +277,14 @@ pub(crate) fn render_tooltip<'a>(
                 "success" => tt.style(container::success),
                 "danger" => tt.style(container::danger),
                 "warning" => tt.style(container::warning),
-                _ => tt,
+                _ => {
+                    log::warn!(
+                        "unknown style {:?} for widget type {:?}, using default",
+                        style_name,
+                        "tooltip"
+                    );
+                    tt
+                }
             };
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
