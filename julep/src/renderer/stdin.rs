@@ -238,6 +238,33 @@ pub(crate) fn read_initial_settings(
     match msg {
         IncomingMessage::Settings { settings } => {
             log::info!("initial settings received");
+
+            // Enforce protocol version. If the host declares a version and it
+            // doesn't match ours, log an error and bail -- running with a
+            // mismatched protocol leads to subtle, hard-to-debug failures.
+            let expected = u64::from(julep_core::protocol::PROTOCOL_VERSION);
+            if let Some(version) = settings.get("protocol_version").and_then(|v| v.as_u64()) {
+                if version != expected {
+                    log::error!(
+                        "protocol version mismatch: host sent {}, renderer expects {}",
+                        version,
+                        expected
+                    );
+                    let error_msg = format!(
+                        "{{\"type\":\"error\",\"message\":\"protocol version mismatch: \
+                         host sent {version}, renderer expects {expected}\"}}\n"
+                    );
+                    let _ = io::stdout().lock().write_all(error_msg.as_bytes());
+                    let _ = io::stdout().lock().flush();
+                    std::process::exit(1);
+                }
+            } else {
+                log::warn!(
+                    "no protocol_version in Settings, assuming compatible (expected {})",
+                    expected
+                );
+            }
+
             let antialiasing = settings
                 .get("antialiasing")
                 .and_then(|v| v.as_bool())
