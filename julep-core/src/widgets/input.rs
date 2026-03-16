@@ -67,11 +67,32 @@ pub(crate) fn render_text_input<'a>(
     let widget_id = prop_str(props, "id").unwrap_or_else(|| node.id.clone());
     ti = ti.id(widget_id);
 
+    // Direct color props for placeholder and selection, applied on top of
+    // any style preset or StyleMap.
+    let placeholder_color = prop_color(props, "placeholder_color");
+    let selection_color = prop_color(props, "selection_color");
+
     // Style: string name or style map object
+    let has_color_overrides = placeholder_color.is_some() || selection_color.is_some();
     if let Some(style_val) = props.and_then(|p| p.get("style")) {
         if let Some(style_name) = style_val.as_str() {
             ti = match style_name {
-                "default" => ti.style(text_input::default),
+                "default" => {
+                    if has_color_overrides {
+                        ti.style(move |theme: &iced::Theme, status| {
+                            let mut style = text_input::default(theme, status);
+                            if let Some(pc) = placeholder_color {
+                                style.placeholder = pc;
+                            }
+                            if let Some(sc) = selection_color {
+                                style.selection = sc;
+                            }
+                            style
+                        })
+                    } else {
+                        ti.style(text_input::default)
+                    }
+                }
                 _ => {
                     log::warn!(
                         "unknown style {:?} for widget type {:?}, using default",
@@ -112,13 +133,32 @@ pub(crate) fn render_text_input<'a>(
                                 }
                             };
                             style.value = alpha_color(style.value, 0.5);
+                            style.border = auto_derive_disabled_border(style.border);
                         }
                     }
                     _ => {}
                 }
+                if let Some(pc) = placeholder_color {
+                    style.placeholder = pc;
+                }
+                if let Some(sc) = selection_color {
+                    style.selection = sc;
+                }
                 style
             });
         }
+    } else if has_color_overrides {
+        // No style prop but direct color overrides present
+        ti = ti.style(move |theme: &iced::Theme, status| {
+            let mut style = text_input::default(theme, status);
+            if let Some(pc) = placeholder_color {
+                style.placeholder = pc;
+            }
+            if let Some(sc) = selection_color {
+                style.selection = sc;
+            }
+            style
+        });
     }
 
     ti.into()
@@ -402,13 +442,32 @@ pub(crate) fn render_text_editor<'a>(
         }
     }
 
+    // Direct color props for placeholder and selection
+    let placeholder_color = prop_color(props, "placeholder_color");
+    let selection_color = prop_color(props, "selection_color");
+
     // Style closure, shared between plain and highlighted paths
     #[allow(clippy::type_complexity)]
     let style_fn: Option<Box<dyn Fn(&iced::Theme, text_editor::Status) -> text_editor::Style>> =
         if let Some(style_val) = props.and_then(|p| p.get("style")) {
             if let Some(style_name) = style_val.as_str() {
                 match style_name {
-                    "default" => Some(Box::new(text_editor::default)),
+                    "default" => {
+                        if placeholder_color.is_some() || selection_color.is_some() {
+                            Some(Box::new(move |theme: &iced::Theme, status| {
+                                let mut style = text_editor::default(theme, status);
+                                if let Some(pc) = placeholder_color {
+                                    style.placeholder = pc;
+                                }
+                                if let Some(sc) = selection_color {
+                                    style.selection = sc;
+                                }
+                                style
+                            }))
+                        } else {
+                            Some(Box::new(text_editor::default))
+                        }
+                    }
                     _ => {
                         log::warn!(
                             "unknown style {:?} for widget type {:?}, using default",
@@ -449,15 +508,34 @@ pub(crate) fn render_text_editor<'a>(
                                     }
                                 };
                                 style.value = alpha_color(style.value, 0.5);
+                                style.border = auto_derive_disabled_border(style.border);
                             }
                         }
                         _ => {}
+                    }
+                    if let Some(pc) = placeholder_color {
+                        style.placeholder = pc;
+                    }
+                    if let Some(sc) = selection_color {
+                        style.selection = sc;
                     }
                     style
                 }))
             } else {
                 None
             }
+        } else if placeholder_color.is_some() || selection_color.is_some() {
+            // No style prop but direct color overrides present
+            Some(Box::new(move |theme: &iced::Theme, status| {
+                let mut style = text_editor::default(theme, status);
+                if let Some(pc) = placeholder_color {
+                    style.placeholder = pc;
+                }
+                if let Some(sc) = selection_color {
+                    style.selection = sc;
+                }
+                style
+            }))
         } else {
             None
         };
@@ -634,6 +712,7 @@ pub(crate) fn render_checkbox<'a>(
                             if let Some(tc) = style.text_color {
                                 style.text_color = Some(alpha_color(tc, 0.5));
                             }
+                            style.border = auto_derive_disabled_border(style.border);
                         }
                     }
                     _ => {}
@@ -747,6 +826,10 @@ pub(crate) fn render_toggler<'a>(
                             if let Some(tc) = style.text_color {
                                 style.text_color = Some(alpha_color(tc, 0.5));
                             }
+                            style.background_border_color =
+                                alpha_color(style.background_border_color, 0.5);
+                            style.foreground_border_color =
+                                alpha_color(style.foreground_border_color, 0.5);
                         }
                     }
                     _ => {}

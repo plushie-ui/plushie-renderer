@@ -54,6 +54,8 @@ pub(crate) fn render_button<'a>(
                 "warning" => b.style(button::warning),
                 "danger" => b.style(button::danger),
                 "text" => b.style(button::text),
+                "background" => b.style(button::background),
+                "subtle" => b.style(button::subtle),
                 _ => {
                     log::warn!(
                         "unknown style {:?} for widget type {:?}, using default",
@@ -87,6 +89,8 @@ pub(crate) fn render_button<'a>(
                         } else {
                             style.background = auto_derive_disabled_bg(style.background);
                             style.text_color = auto_derive_disabled_text(style.text_color);
+                            style.border = auto_derive_disabled_border(style.border);
+                            style.shadow = auto_derive_disabled_shadow(style.shadow);
                         }
                     }
                     _ => {}

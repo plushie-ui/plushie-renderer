@@ -689,6 +689,28 @@ pub(crate) fn auto_derive_disabled_text(color: Color) -> Color {
     alpha_color(color, 0.5)
 }
 
+/// Auto-derive disabled border by reducing border color alpha to 50%.
+pub(crate) fn auto_derive_disabled_border(border: Border) -> Border {
+    Border {
+        color: alpha_color(border.color, 0.5),
+        ..border
+    }
+}
+
+/// Auto-derive disabled shadow by reducing shadow color alpha to 50%.
+pub(crate) fn auto_derive_disabled_shadow(shadow: Shadow) -> Shadow {
+    Shadow {
+        color: alpha_color(shadow.color, 0.5),
+        ..shadow
+    }
+}
+
+/// Parse a color prop from a props map by key. Accepts hex strings and
+/// {r,g,b,a} objects, same as `parse_color`.
+pub(crate) fn prop_color(props: Props<'_>, key: &str) -> Option<Color> {
+    props?.get(key).and_then(parse_color)
+}
+
 /// Apply style map fields to a button style. Background wraps in `Some`,
 /// text_color, border, and shadow map directly.
 pub(crate) fn apply_button_fields(style: &mut button::Style, fields: &StyleMapFields) {
