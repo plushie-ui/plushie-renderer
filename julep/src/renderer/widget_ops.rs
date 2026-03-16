@@ -122,6 +122,14 @@ impl App {
                     window::oldest().and_then(window::close)
                 }
             }
+            "announce" => {
+                let text = payload
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                iced::announce(text)
+            }
             "exit" => iced::exit(),
             // -- PaneGrid operations --
             // The host sends: target (grid id), pane, axis, new_pane_id, a, b
