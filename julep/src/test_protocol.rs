@@ -24,15 +24,25 @@ const MAX_SEARCH_DEPTH: usize = 256;
 pub enum Selector {
     Id(String),
     Text(String),
+    Role(String),
+    Label(String),
+    Focused,
 }
 
 pub fn parse_selector(selector: &Value) -> Option<Selector> {
     let by = selector.get("by")?.as_str()?;
-    let value = selector.get("value")?.as_str()?.to_string();
     match by {
-        "id" => Some(Selector::Id(value)),
-        "text" => Some(Selector::Text(value)),
-        _ => None,
+        "focused" => Some(Selector::Focused),
+        _ => {
+            let value = selector.get("value")?.as_str()?.to_string();
+            match by {
+                "id" => Some(Selector::Id(value)),
+                "text" => Some(Selector::Text(value)),
+                "role" => Some(Selector::Role(value)),
+                "label" => Some(Selector::Label(value)),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -162,6 +172,100 @@ fn search_by_id(node: &TreeNode, id: &str, depth: usize) -> Option<Value> {
     None
 }
 
+pub fn find_node_by_role(core: &Core, role: &str) -> Value {
+    match core.tree.root() {
+        Some(root) => search_by_role(root, role, 0).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
+
+pub fn find_node_by_label(core: &Core, label: &str) -> Value {
+    match core.tree.root() {
+        Some(root) => search_by_label(root, label, 0).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
+
+pub fn find_focused_node(core: &Core) -> Value {
+    match core.tree.root() {
+        Some(root) => search_focused(root, 0).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
+
+fn search_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<Value> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    // Check explicit a11y.role prop first. When present it takes priority
+    // over type_name -- the host explicitly overrode the semantic role.
+    if let Some(a11y) = node.props.get("a11y") {
+        if let Some(node_role) = a11y.get("role").and_then(|v| v.as_str())
+            && node_role == role
+        {
+            return serde_json::to_value(node).ok();
+        }
+        // Explicit a11y present -- don't fall through to type_name.
+    } else if node.type_name == role {
+        // No explicit a11y role -- fall back to widget type_name.
+        return serde_json::to_value(node).ok();
+    }
+    for child in &node.children {
+        if let Some(found) = search_by_role(child, role, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn search_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<Value> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    // Check explicit a11y.label prop
+    if let Some(a11y) = node.props.get("a11y")
+        && let Some(node_label) = a11y.get("label").and_then(|v| v.as_str())
+        && node_label == label
+    {
+        return serde_json::to_value(node).ok();
+    }
+    // Also check common text props that serve as implicit labels
+    for key in &["label", "content"] {
+        if let Some(val) = node.props.get(*key)
+            && val.as_str() == Some(label)
+        {
+            return serde_json::to_value(node).ok();
+        }
+    }
+    for child in &node.children {
+        if let Some(found) = search_by_label(child, label, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn search_focused(node: &TreeNode, depth: usize) -> Option<Value> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    // Check if node has a focused prop or a11y.focused
+    if node.props.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+        return serde_json::to_value(node).ok();
+    }
+    if let Some(a11y) = node.props.get("a11y")
+        && a11y.get("focused").and_then(|v| v.as_bool()) == Some(true)
+    {
+        return serde_json::to_value(node).ok();
+    }
+    for child in &node.children {
+        if let Some(found) = search_focused(child, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 fn search_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<Value> {
     if depth > MAX_SEARCH_DEPTH {
         return None;
@@ -175,6 +279,73 @@ fn search_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<Value> {
     }
     for child in &node.children {
         if let Some(found) = search_by_text(child, text, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_id_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<String> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    if let Some(a11y) = node.props.get("a11y") {
+        if let Some(node_role) = a11y.get("role").and_then(|v| v.as_str())
+            && node_role == role
+        {
+            return Some(node.id.clone());
+        }
+        // Explicit a11y present -- skip type_name fallback.
+    } else if node.type_name == role {
+        return Some(node.id.clone());
+    }
+    for child in &node.children {
+        if let Some(found) = find_id_by_role(child, role, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_id_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<String> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    if let Some(a11y) = node.props.get("a11y")
+        && let Some(node_label) = a11y.get("label").and_then(|v| v.as_str())
+        && node_label == label
+    {
+        return Some(node.id.clone());
+    }
+    for key in &["label", "content"] {
+        if let Some(val) = node.props.get(*key)
+            && val.as_str() == Some(label)
+        {
+            return Some(node.id.clone());
+        }
+    }
+    for child in &node.children {
+        if let Some(found) = find_id_by_label(child, label, depth + 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
+    if depth > MAX_SEARCH_DEPTH {
+        return None;
+    }
+    if node.props.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+        return Some(node.id.clone());
+    }
+    if let Some(a11y) = node.props.get("a11y")
+        && a11y.get("focused").and_then(|v| v.as_bool()) == Some(true)
+    {
+        return Some(node.id.clone());
+    }
+    for child in &node.children {
+        if let Some(found) = find_id_focused(child, depth + 1) {
             return Some(found);
         }
     }
@@ -214,6 +385,9 @@ pub fn handle_query(core: &Core, id: String, target: String, selector: Value) {
         "find" => match parse_selector(&selector) {
             Some(Selector::Id(widget_id)) => find_node_by_id(core, &widget_id),
             Some(Selector::Text(text)) => find_node_by_text(core, &text),
+            Some(Selector::Role(role)) => find_node_by_role(core, &role),
+            Some(Selector::Label(label)) => find_node_by_label(core, &label),
+            Some(Selector::Focused) => find_focused_node(core),
             None => Value::Null,
         },
         _ => {
@@ -234,6 +408,15 @@ pub fn handle_interact(core: &Core, id: String, action: String, selector: Value,
             .tree
             .root()
             .and_then(|root| find_id_by_text(root, &text, 0)),
+        Some(Selector::Role(role)) => core
+            .tree
+            .root()
+            .and_then(|root| find_id_by_role(root, &role, 0)),
+        Some(Selector::Label(label)) => core
+            .tree
+            .root()
+            .and_then(|root| find_id_by_label(root, &label, 0)),
+        Some(Selector::Focused) => core.tree.root().and_then(|root| find_id_focused(root, 0)),
         None => None,
     };
 
@@ -682,6 +865,242 @@ mod tests {
             "i13".to_string(),
             "click".to_string(),
             json!({"by": "text", "value": "Click me"}),
+            json!({}),
+        );
+    }
+
+    // -- parse_selector: new variants --
+
+    #[test]
+    fn parse_selector_by_role() {
+        let sel = json!({"by": "role", "value": "button"});
+        match parse_selector(&sel) {
+            Some(Selector::Role(r)) => assert_eq!(r, "button"),
+            other => panic!("expected Role, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_by_label() {
+        let sel = json!({"by": "label", "value": "Submit"});
+        match parse_selector(&sel) {
+            Some(Selector::Label(l)) => assert_eq!(l, "Submit"),
+            other => panic!("expected Label, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_focused() {
+        let sel = json!({"by": "focused"});
+        match parse_selector(&sel) {
+            Some(Selector::Focused) => {}
+            other => panic!("expected Focused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_selector_focused_ignores_value() {
+        // "focused" should work even if a value field is present
+        let sel = json!({"by": "focused", "value": "ignored"});
+        match parse_selector(&sel) {
+            Some(Selector::Focused) => {}
+            other => panic!("expected Focused, got {other:?}"),
+        }
+    }
+
+    // -- search_by_role --
+
+    fn make_a11y_node(id: &str, type_name: &str, a11y: Value) -> TreeNode {
+        TreeNode {
+            id: id.to_string(),
+            type_name: type_name.to_string(),
+            props: json!({"a11y": a11y}),
+            children: vec![],
+        }
+    }
+
+    #[test]
+    fn search_by_role_matches_a11y_prop() {
+        let node = make_a11y_node("btn", "container", json!({"role": "button"}));
+        let result = search_by_role(&node, "button", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "btn");
+    }
+
+    #[test]
+    fn search_by_role_matches_type_name() {
+        let node = make_node("btn", "button");
+        let result = search_by_role(&node, "button", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "btn");
+    }
+
+    #[test]
+    fn search_by_role_prefers_a11y_over_type() {
+        // a11y role "heading" on a "container" type -- should match "heading", not "container"
+        let node = make_a11y_node("h1", "container", json!({"role": "heading"}));
+        assert!(search_by_role(&node, "heading", 0).is_some());
+        assert!(search_by_role(&node, "container", 0).is_none());
+    }
+
+    #[test]
+    fn search_by_role_finds_in_children() {
+        let mut root = make_node("root", "column");
+        root.children.push(make_a11y_node(
+            "slider",
+            "slider",
+            json!({"role": "slider"}),
+        ));
+        let result = search_by_role(&root, "slider", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "slider");
+    }
+
+    #[test]
+    fn search_by_role_not_found() {
+        let node = make_node("root", "column");
+        assert!(search_by_role(&node, "button", 0).is_none());
+    }
+
+    // -- search_by_label --
+
+    #[test]
+    fn search_by_label_matches_a11y_label() {
+        let node = make_a11y_node("btn", "button", json!({"label": "Submit"}));
+        let result = search_by_label(&node, "Submit", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "btn");
+    }
+
+    #[test]
+    fn search_by_label_matches_label_prop() {
+        let mut node = make_node("chk", "checkbox");
+        node.props = json!({"label": "Accept terms"});
+        let result = search_by_label(&node, "Accept terms", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "chk");
+    }
+
+    #[test]
+    fn search_by_label_matches_content_prop() {
+        let node = make_text_node("txt", "Hello World");
+        let result = search_by_label(&node, "Hello World", 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "txt");
+    }
+
+    #[test]
+    fn search_by_label_not_found() {
+        let node = make_node("root", "column");
+        assert!(search_by_label(&node, "Missing", 0).is_none());
+    }
+
+    // -- search_focused --
+
+    #[test]
+    fn search_focused_matches_focused_prop() {
+        let mut node = make_node("inp", "text_input");
+        node.props = json!({"focused": true});
+        let result = search_focused(&node, 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "inp");
+    }
+
+    #[test]
+    fn search_focused_matches_a11y_focused() {
+        let node = make_a11y_node("inp", "text_input", json!({"focused": true}));
+        let result = search_focused(&node, 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "inp");
+    }
+
+    #[test]
+    fn search_focused_skips_unfocused() {
+        let mut node = make_node("inp", "text_input");
+        node.props = json!({"focused": false});
+        assert!(search_focused(&node, 0).is_none());
+    }
+
+    #[test]
+    fn search_focused_finds_in_children() {
+        let mut root = make_node("root", "column");
+        let mut child = make_node("inp", "text_input");
+        child.props = json!({"focused": true});
+        root.children.push(child);
+        let result = search_focused(&root, 0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["id"], "inp");
+    }
+
+    #[test]
+    fn search_focused_not_found() {
+        let root = make_node("root", "column");
+        assert!(search_focused(&root, 0).is_none());
+    }
+
+    // -- find_id_by_role / find_id_by_label / find_id_focused --
+
+    #[test]
+    fn find_id_by_role_returns_id() {
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("btn", "button"));
+        assert_eq!(find_id_by_role(&root, "button", 0), Some("btn".to_string()));
+    }
+
+    #[test]
+    fn find_id_by_label_returns_id() {
+        let mut root = make_node("root", "column");
+        root.children
+            .push(make_a11y_node("btn", "button", json!({"label": "Submit"})));
+        assert_eq!(
+            find_id_by_label(&root, "Submit", 0),
+            Some("btn".to_string())
+        );
+    }
+
+    #[test]
+    fn find_id_focused_returns_id() {
+        let mut root = make_node("root", "column");
+        let mut child = make_node("inp", "text_input");
+        child.props = json!({"focused": true});
+        root.children.push(child);
+        assert_eq!(find_id_focused(&root, 0), Some("inp".to_string()));
+    }
+
+    // -- handle_interact with new selectors --
+
+    #[test]
+    fn handle_interact_by_role_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i14".to_string(),
+            "click".to_string(),
+            json!({"by": "role", "value": "text_input"}),
+            json!({}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_by_label_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i15".to_string(),
+            "click".to_string(),
+            json!({"by": "label", "value": "Click me"}),
+            json!({}),
+        );
+    }
+
+    #[test]
+    fn handle_interact_focused_does_not_panic() {
+        let core = core_with_tree();
+        handle_interact(
+            &core,
+            "i16".to_string(),
+            "click".to_string(),
+            json!({"by": "focused"}),
             json!({}),
         );
     }
