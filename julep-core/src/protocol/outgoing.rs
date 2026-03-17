@@ -271,6 +271,7 @@ impl OutgoingEvent {
         position: Option<(f32, f32)>,
         width: f32,
         height: f32,
+        scale_factor: f32,
     ) -> Self {
         let pos =
             position.map(|(x, y)| serde_json::json!({"x": sanitize_f32(x), "y": sanitize_f32(y)}));
@@ -280,6 +281,7 @@ impl OutgoingEvent {
                 "position": pos,
                 "width": sanitize_f32(width),
                 "height": sanitize_f32(height),
+                "scale_factor": sanitize_f32(scale_factor),
             })),
             ..Self::tagged("window_opened", tag)
         }

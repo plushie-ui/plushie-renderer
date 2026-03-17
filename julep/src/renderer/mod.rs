@@ -805,7 +805,11 @@ impl App {
             return Task::none();
         }
         match evt {
-            window::Event::Opened { position, size, .. } => {
+            window::Event::Opened {
+                position,
+                size,
+                scale_factor,
+            } => {
                 if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
                     let pos = position.map(|p| (p.x, p.y));
                     emit_event(OutgoingEvent::window_opened(
@@ -814,6 +818,7 @@ impl App {
                         pos,
                         size.width,
                         size.height,
+                        scale_factor,
                     ));
                 }
                 if let Some(tag) = self.core.active_subscriptions.get("on_window_open") {
@@ -824,6 +829,7 @@ impl App {
                         pos,
                         size.width,
                         size.height,
+                        scale_factor,
                     ));
                 }
             }

@@ -1088,6 +1088,7 @@ mod tests {
             Some((10.0, 20.0)),
             800.0,
             600.0,
+            2.0,
         );
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "window_opened");
@@ -1096,6 +1097,7 @@ mod tests {
         assert_eq!(json["data"]["height"], 600.0);
         assert_eq!(json["data"]["position"]["x"], 10.0);
         assert_eq!(json["data"]["position"]["y"], 20.0);
+        assert_eq!(json["data"]["scale_factor"], 2.0);
     }
 
     #[test]
@@ -1106,10 +1108,12 @@ mod tests {
             None,
             1024.0,
             768.0,
+            1.0,
         );
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["family"], "window_opened");
         assert!(json["data"]["position"].is_null());
+        assert_eq!(json["data"]["scale_factor"], 1.0);
     }
 
     #[test]

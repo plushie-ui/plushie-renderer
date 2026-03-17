@@ -632,7 +632,7 @@ tag from the subscription registration.
 
 | Family | Fields |
 |--------|--------|
-| `window_opened` | tag, data: {window_id, position: {x, y}, width, height} |
+| `window_opened` | tag, data: {window_id, position: {x, y}, width, height, scale_factor} |
 | `window_closed` | tag, data: {window_id} |
 | `window_close_requested` | tag, data: {window_id} |
 | `window_moved` | tag, data: {window_id, x, y} |
