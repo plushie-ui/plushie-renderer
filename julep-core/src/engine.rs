@@ -1,3 +1,10 @@
+//! Pure state engine, decoupled from the iced runtime.
+//!
+//! [`Core`] owns the UI tree, widget caches, and subscription state.
+//! It processes [`IncomingMessage`]s and returns [`CoreEffect`]s that
+//! the host (the iced `App` or the headless runner) must execute.
+//! Core never touches iced directly -- it's pure state management.
+
 use std::collections::HashMap;
 
 use iced::Font;
@@ -9,9 +16,8 @@ use crate::theming;
 use crate::tree::Tree;
 use crate::widgets::{self, WidgetCaches};
 
-/// Side effects produced by Core::apply() that the host (App or headless) must handle.
+/// Side effects produced by [`Core::apply`] that the host must handle.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum CoreEffect {
     /// The window set may have changed -- re-sync with renderer.
     SyncWindows,
@@ -50,12 +56,21 @@ pub enum CoreEffect {
     },
 }
 
-/// Pure state core, decoupled from iced runtime.
+/// Pure state core, decoupled from the iced runtime.
+///
+/// Owns the retained UI tree, widget caches, active subscriptions, and
+/// global rendering defaults. The host calls [`apply`](Self::apply) with
+/// each incoming message and executes the returned [`CoreEffect`]s.
 pub struct Core {
+    /// The retained UI tree (snapshots replace it, patches update it).
     pub tree: Tree,
+    /// Caches for stateful widgets (text_editor content, markdown items, etc.).
     pub caches: WidgetCaches,
+    /// Active event subscriptions: kind -> tag.
     pub active_subscriptions: HashMap<String, String>,
+    /// Global default text size from Settings.
     pub default_text_size: Option<f32>,
+    /// Global default font from Settings.
     pub default_font: Option<Font>,
     /// Cached resolved theme from the root node's `theme` prop.
     /// Only re-resolved when the raw JSON value changes.
@@ -176,7 +191,14 @@ impl Core {
             }
             IncomingMessage::SubscriptionRegister { kind, tag } => {
                 log::debug!("subscription register: {kind} -> {tag}");
-                self.active_subscriptions.insert(kind, tag);
+                if let Some(old_tag) = self.active_subscriptions.insert(kind.clone(), tag.clone())
+                    && old_tag != tag
+                {
+                    log::warn!(
+                        "subscription `{kind}` re-registered with tag `{tag}` \
+                         (was `{old_tag}`); previous handler replaced"
+                    );
+                }
             }
             IncomingMessage::SubscriptionUnregister { kind } => {
                 log::debug!("subscription unregister: {kind}");
@@ -210,16 +232,13 @@ impl Core {
                     log::error!("no protocol_version in Settings, assuming compatible");
                 }
 
-                // Warn about startup-only fields that cannot be changed after
-                // the iced daemon has already started. These are consumed by
-                // the renderer at launch and subsequent values are silently
-                // ignored by the runtime.
+                // Startup-only fields cannot be changed after the iced
+                // daemon has started. Warn so hosts notice the no-op.
                 for field in &["antialiasing", "vsync", "fonts", "scale_factor"] {
                     if settings.get(*field).is_some() {
-                        log::debug!(
-                            "Settings field `{field}` is startup-only and \
-                             cannot be changed after the daemon has started; \
-                             this value will be ignored"
+                        log::warn!(
+                            "Settings field `{field}` is startup-only; \
+                             ignored after the daemon has started"
                         );
                     }
                 }
@@ -230,10 +249,16 @@ impl Core {
                     .map(|v| v as f32);
                 self.default_font = settings.get("default_font").map(|v| {
                     let family = v.get("family").and_then(|f| f.as_str());
-                    if family == Some("monospace") {
-                        Font::MONOSPACE
-                    } else {
-                        Font::DEFAULT
+                    match family {
+                        Some("monospace") => Font::MONOSPACE,
+                        Some(other) => {
+                            log::warn!(
+                                "unsupported default_font family `{other}`, \
+                                 using system default"
+                            );
+                            Font::DEFAULT
+                        }
+                        None => Font::DEFAULT,
                     }
                 });
                 self.caches.default_text_size = self.default_text_size;
