@@ -168,7 +168,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
             translation,
         );
 
-        let content_overlay = Some(overlay::Element::new(Box::new(OverlayContent {
+        let content_overlay = overlay::Element::new(Box::new(OverlayContent {
             content: &mut self.content,
             tree: content_tree,
             position: self.position,
@@ -177,19 +177,18 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
             offset_y: self.offset_y,
             anchor_bounds: layout.bounds(),
             translation,
-        })));
+        }));
 
         // If the anchor also produces overlays, group them together.
-        if anchor_overlay.is_some() || content_overlay.is_some() {
-            Some(
-                overlay::Group::with_children(
-                    anchor_overlay.into_iter().chain(content_overlay).collect(),
-                )
-                .overlay(),
+        Some(
+            overlay::Group::with_children(
+                anchor_overlay
+                    .into_iter()
+                    .chain(Some(content_overlay))
+                    .collect(),
             )
-        } else {
-            None
-        }
+            .overlay(),
+        )
     }
 
     fn operate(
@@ -215,6 +214,8 @@ impl<'a> From<OverlayWrapper<'a>> for Element<'a, Message> {
 // Overlay content (the piece that floats above everything)
 // ---------------------------------------------------------------------------
 
+/// The floating overlay piece. Positioned relative to the anchor bounds
+/// and clamped to the viewport edges.
 struct OverlayContent<'a, 'b> {
     content: &'b mut Element<'a, Message>,
     tree: &'b mut widget::Tree,
@@ -224,6 +225,14 @@ struct OverlayContent<'a, 'b> {
     offset_y: f32,
     anchor_bounds: Rectangle,
     translation: Vector,
+}
+
+/// Extract the single child layout from an overlay layout node.
+fn content_layout<'a>(layout: Layout<'a>) -> Layout<'a> {
+    layout
+        .children()
+        .next()
+        .expect("overlay content must have a child layout")
 }
 
 impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'_, '_> {
@@ -278,10 +287,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         layout: Layout<'_>,
         cursor: iced::mouse::Cursor,
     ) {
-        let content_layout = layout
-            .children()
-            .next()
-            .expect("overlay content must have a child layout");
+        let content_layout = content_layout(layout);
         self.content.as_widget().draw(
             self.tree,
             renderer,
@@ -301,10 +307,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        let content_layout = layout
-            .children()
-            .next()
-            .expect("overlay content must have a child layout");
+        let content_layout = content_layout(layout);
         self.content.as_widget_mut().update(
             self.tree,
             event,
@@ -323,10 +326,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         renderer: &iced::Renderer,
     ) -> iced::mouse::Interaction {
         let viewport = Rectangle::with_size(Size::INFINITE);
-        let content_layout = layout
-            .children()
-            .next()
-            .expect("overlay content must have a child layout");
+        let content_layout = content_layout(layout);
         self.content.as_widget().mouse_interaction(
             self.tree,
             content_layout,
@@ -342,10 +342,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        let content_layout = layout
-            .children()
-            .next()
-            .expect("overlay content must have a child layout");
+        let content_layout = content_layout(layout);
         self.content
             .as_widget_mut()
             .operate(self.tree, content_layout, renderer, operation);
@@ -356,10 +353,7 @@ impl overlay::Overlay<Message, iced::Theme, iced::Renderer> for OverlayContent<'
         layout: Layout<'c>,
         renderer: &iced::Renderer,
     ) -> Option<overlay::Element<'c, Message, iced::Theme, iced::Renderer>> {
-        let content_layout = layout
-            .children()
-            .next()
-            .expect("overlay content must have a child layout");
+        let content_layout = content_layout(layout);
         self.content.as_widget_mut().overlay(
             self.tree,
             content_layout,
