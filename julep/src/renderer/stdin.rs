@@ -119,7 +119,7 @@ pub(crate) fn read_initial_settings(
             (Codec::detect_from_first_byte(first[0]), Some(first[0]))
         }
     };
-    log::info!("wire codec: {codec:?}");
+    log::info!("wire codec: {codec}");
     Codec::set_global(codec);
 
     // Read the first framed message. If we consumed a detection byte, we need

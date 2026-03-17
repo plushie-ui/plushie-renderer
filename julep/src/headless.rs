@@ -49,7 +49,7 @@ pub mod headless_mode {
                 Codec::detect_from_first_byte(buf[0])
             }
         };
-        log::info!("wire codec: {codec:?}");
+        log::info!("wire codec: {codec}");
         Codec::set_global(codec);
 
         crate::renderer::emit_hello();

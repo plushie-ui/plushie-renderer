@@ -1,5 +1,23 @@
+//! Wire codec for the stdin/stdout protocol.
+//!
+//! The renderer communicates with the host process over stdin (incoming
+//! messages) and stdout (outgoing events). Two wire formats are supported:
+//!
+//! - **JSON** -- newline-delimited JSON (JSONL). Each message is a UTF-8
+//!   JSON object terminated by `\n`. Human-readable, easy to debug.
+//!
+//! - **MsgPack** -- 4-byte big-endian length-prefixed MessagePack. Each
+//!   message is `[u32 BE length][msgpack payload]`. Compact, faster to
+//!   parse, supports native binary fields (e.g. pixel data).
+//!
+//! The codec is auto-detected from the first byte of stdin (`{` = JSON,
+//! anything else = MsgPack) and stored in a process-global [`OnceLock`]
+//! so that all emit paths (events, queries, screenshots) use the same
+//! format without threading the codec through every call site.
+
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::fmt;
 use std::io::{self, BufRead, Read};
 use std::sync::OnceLock;
 
@@ -11,21 +29,27 @@ pub const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 /// overflow from deeply nested (or maliciously crafted) msgpack payloads.
 const MAX_RMPV_DEPTH: usize = 128;
 
-/// Global wire codec negotiated at startup. Set once by the binary crate,
-/// read by protocol.rs (emit_screenshot_response) and headless/test modes.
+/// Process-global wire codec, set once at startup via [`Codec::set_global`].
 static WIRE_CODEC: OnceLock<Codec> = OnceLock::new();
 
-/// Wire codec for communication with the host process.
+/// Wire codec for the stdin/stdout protocol.
 ///
-/// `Json` uses newline-delimited JSON (JSONL). Each message is a UTF-8 JSON
-/// object terminated by `\n`.
-///
-/// `MsgPack` uses 4-byte big-endian length-prefixed MessagePack. Each message
-/// is `[u32 BE length][msgpack payload]`.
+/// See the [module documentation](self) for format details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Codec {
+    /// Newline-delimited JSON (JSONL).
     Json,
+    /// Length-prefixed MessagePack.
     MsgPack,
+}
+
+impl fmt::Display for Codec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Codec::Json => f.write_str("json"),
+            Codec::MsgPack => f.write_str("msgpack"),
+        }
+    }
 }
 
 impl Codec {
@@ -883,6 +907,12 @@ mod tests {
     #[test]
     fn detect_msgpack_from_fixmap() {
         assert_eq!(Codec::detect_from_first_byte(0x85), Codec::MsgPack);
+    }
+
+    #[test]
+    fn display_format() {
+        assert_eq!(Codec::Json.to_string(), "json");
+        assert_eq!(Codec::MsgPack.to_string(), "msgpack");
     }
 
     // -- Additional rmpv_to_json coverage --
