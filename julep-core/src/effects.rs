@@ -194,7 +194,11 @@ fn handle_directory_select(id: String, payload: &Value) -> EffectResponse {
         .and_then(|v| v.as_str())
         .unwrap_or("Select Directory");
 
-    let dialog = rfd::FileDialog::new().set_title(title);
+    let mut dialog = rfd::FileDialog::new().set_title(title);
+
+    if let Some(dir) = payload.get("directory").and_then(|v| v.as_str()) {
+        dialog = dialog.set_directory(dir);
+    }
 
     match dialog.pick_folder() {
         Some(path) => EffectResponse::ok(id, json!({"path": path_to_json_string(&path)})),
@@ -213,7 +217,11 @@ fn handle_directory_select_multiple(id: String, payload: &Value) -> EffectRespon
         .and_then(|v| v.as_str())
         .unwrap_or("Select Directories");
 
-    let dialog = rfd::FileDialog::new().set_title(title);
+    let mut dialog = rfd::FileDialog::new().set_title(title);
+
+    if let Some(dir) = payload.get("directory").and_then(|v| v.as_str()) {
+        dialog = dialog.set_directory(dir);
+    }
 
     match dialog.pick_folders() {
         Some(paths) => {
@@ -551,7 +559,11 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
                 .and_then(|v| v.as_str())
                 .unwrap_or("Select Directory");
 
-            let dialog = rfd::AsyncFileDialog::new().set_title(title);
+            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
+
+            if let Some(dir) = params.get("directory").and_then(|v| v.as_str()) {
+                dialog = dialog.set_directory(dir);
+            }
 
             match dialog.pick_folder().await {
                 Some(handle) => {
@@ -566,7 +578,11 @@ pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) 
                 .and_then(|v| v.as_str())
                 .unwrap_or("Select Directories");
 
-            let dialog = rfd::AsyncFileDialog::new().set_title(title);
+            let mut dialog = rfd::AsyncFileDialog::new().set_title(title);
+
+            if let Some(dir) = params.get("directory").and_then(|v| v.as_str()) {
+                dialog = dialog.set_directory(dir);
+            }
 
             match dialog.pick_folders().await {
                 Some(handles) => {
