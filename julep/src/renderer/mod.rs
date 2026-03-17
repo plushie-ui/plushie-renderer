@@ -805,7 +805,7 @@ impl App {
             return Task::none();
         }
         match evt {
-            window::Event::Opened { position, size } => {
+            window::Event::Opened { position, size, .. } => {
                 if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
                     let pos = position.map(|p| (p.x, p.y));
                     emit_event(OutgoingEvent::window_opened(
