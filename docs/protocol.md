@@ -412,7 +412,7 @@ Request a platform effect (file dialog, clipboard, notification).
 |------|---------|----------|
 | `file_open` | title, directory, filters | path |
 | `file_open_multiple` | title, directory, filters | paths (array) |
-| `file_save` | title, directory, filters, file_name | path |
+| `file_save` | title, directory, filters, default_name | path |
 | `directory_select` | title, directory | path |
 | `directory_select_multiple` | title, directory | paths (array) |
 | `clipboard_read` | -- | text |
@@ -785,15 +785,15 @@ props.
 
 | Widget | Prop | Type | Description |
 |--------|------|------|-------------|
-| `text` | `ellipsis` | string | Text overflow: `"none"`, `"default"`, or custom string |
+| `text` | `ellipsis` | string | Text overflow: `"none"`, `"start"`, `"middle"`, `"end"` |
 | `rich_text` | `wrapping` | string | Text wrapping mode |
-| `rich_text` | `ellipsis` | string | Text overflow: `"none"`, `"default"`, or custom string |
+| `rich_text` | `ellipsis` | string | Text overflow: `"none"`, `"start"`, `"middle"`, `"end"` |
 | `text_input` | `placeholder_color` | hex color | Placeholder text colour |
 | `text_input` | `selection_color` | hex color | Text selection highlight |
-| `text_input` | `ime_purpose` | string | IME hint: `"terminal"`, `"normal"`, `"password"`, `"url"`, `"email"`, `"number"`, `"phone"`, `"name"` |
+| `text_input` | `ime_purpose` | string | IME hint: `"normal"`, `"secure"`, `"terminal"` |
 | `text_editor` | `placeholder_color` | hex color | Placeholder text colour |
 | `text_editor` | `selection_color` | hex color | Text selection highlight |
-| `text_editor` | `ime_purpose` | string | IME hint (same values as text_input) |
+| `text_editor` | `ime_purpose` | string | IME hint: `"normal"`, `"secure"`, `"terminal"` |
 | `slider` | `rail_color` | hex color | Track rail colour |
 | `slider` | `rail_width` | number | Track rail thickness |
 | `vertical_slider` | `rail_color` | hex color | Track rail colour |
