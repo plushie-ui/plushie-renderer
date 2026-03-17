@@ -320,16 +320,12 @@ impl App {
                     // RGBA pixel data (raw bytes, no base64 decode needed)
                     let w = width.unwrap_or(0);
                     let h = height.unwrap_or(0);
-                    self.image_registry.create_from_rgba(
-                        handle.to_string(),
-                        w,
-                        h,
-                        pixel_bytes.to_vec(),
-                    )
+                    self.image_registry
+                        .create_from_rgba(handle, w, h, pixel_bytes.to_vec())
                 } else if let Some(image_bytes) = data {
                     // Encoded image bytes (PNG, JPEG, etc. -- raw bytes)
                     self.image_registry
-                        .create_from_bytes(handle.to_string(), image_bytes.to_vec())
+                        .create_from_bytes(handle, image_bytes.to_vec())
                 } else {
                     log::warn!("image_op {op}: missing data or pixels field");
                     Err(format!("image_op {op}: missing data or pixels field"))

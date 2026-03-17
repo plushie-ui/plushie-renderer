@@ -723,7 +723,7 @@ mod tests {
             0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
         registry
-            .create_from_bytes("test_sprite".to_string(), png_bytes)
+            .create_from_bytes("test_sprite", png_bytes)
             .expect("test sprite should be valid");
         assert!(
             registry.get("test_sprite").is_some(),

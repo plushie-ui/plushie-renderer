@@ -1,3 +1,11 @@
+//! In-memory image handle storage.
+//!
+//! The host creates images by sending encoded bytes (PNG, JPEG, etc.)
+//! or raw RGBA pixel data via `image_op` messages. Each image is stored
+//! as an iced [`image::Handle`] keyed by a host-chosen name. Widget
+//! nodes reference images by name through the `source` prop, and the
+//! renderer resolves them through [`ImageRegistry::get`].
+
 use std::collections::HashMap;
 
 use iced::widget::image;
@@ -52,7 +60,7 @@ impl ImageRegistry {
     const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024;
 
     /// Store an image from encoded bytes (PNG, JPEG, etc.).
-    pub fn create_from_bytes(&mut self, name: String, data: Vec<u8>) -> Result<(), String> {
+    pub fn create_from_bytes(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
         if data.len() > Self::MAX_PIXEL_BYTES {
             let msg = format!(
                 "encoded data for '{}' exceeds 256 MB limit ({} bytes)",
@@ -69,14 +77,15 @@ impl ImageRegistry {
                 name
             );
         }
-        self.handles.insert(name, image::Handle::from_bytes(data));
+        self.handles
+            .insert(name.to_owned(), image::Handle::from_bytes(data));
         Ok(())
     }
 
     /// Store an image from raw RGBA pixel data.
     pub fn create_from_rgba(
         &mut self,
-        name: String,
+        name: &str,
         width: u32,
         height: u32,
         pixels: Vec<u8>,
@@ -93,7 +102,10 @@ impl ImageRegistry {
             return Err(msg);
         }
 
-        let expected = (width as usize) * (height as usize) * 4;
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| format!("dimensions {}x{} overflow for '{name}'", width, height))?;
         if pixels.len() != expected {
             let msg = format!(
                 "RGBA data size mismatch for '{}': expected {} bytes ({}x{}x4), got {}",
@@ -117,8 +129,10 @@ impl ImageRegistry {
             return Err(msg);
         }
 
-        self.handles
-            .insert(name, image::Handle::from_rgba(width, height, pixels));
+        self.handles.insert(
+            name.to_owned(),
+            image::Handle::from_rgba(width, height, pixels),
+        );
         Ok(())
     }
 
@@ -157,7 +171,7 @@ mod tests {
     fn create_from_bytes_and_get() {
         let mut reg = ImageRegistry::new();
         assert!(
-            reg.create_from_bytes("test".to_string(), vec![0x89, 0x50, 0x4e, 0x47])
+            reg.create_from_bytes("test", vec![0x89, 0x50, 0x4e, 0x47])
                 .is_ok()
         );
         assert!(reg.get("test").is_some());
@@ -168,7 +182,7 @@ mod tests {
         let mut reg = ImageRegistry::new();
         // 1x1 RGBA pixel
         assert!(
-            reg.create_from_rgba("pixel".to_string(), 1, 1, vec![255, 0, 0, 255])
+            reg.create_from_rgba("pixel", 1, 1, vec![255, 0, 0, 255])
                 .is_ok()
         );
         assert!(reg.get("pixel").is_some());
@@ -177,7 +191,7 @@ mod tests {
     #[test]
     fn delete_removes_handle() {
         let mut reg = ImageRegistry::new();
-        let _ = reg.create_from_bytes("gone".to_string(), vec![1, 2, 3]);
+        let _ = reg.create_from_bytes("gone", vec![1, 2, 3]);
         reg.delete("gone");
         assert!(reg.get("gone").is_none());
     }
@@ -192,8 +206,8 @@ mod tests {
     #[test]
     fn overwrite_replaces_handle() {
         let mut reg = ImageRegistry::new();
-        let _ = reg.create_from_bytes("img".to_string(), vec![1]);
-        let _ = reg.create_from_bytes("img".to_string(), vec![2, 3]);
+        let _ = reg.create_from_bytes("img", vec![1]);
+        let _ = reg.create_from_bytes("img", vec![2, 3]);
         assert!(reg.get("img").is_some());
     }
 
@@ -201,7 +215,7 @@ mod tests {
     fn rgba_size_mismatch_rejected() {
         let mut reg = ImageRegistry::new();
         // 2x2 RGBA should be 16 bytes, providing only 4
-        let result = reg.create_from_rgba("bad".to_string(), 2, 2, vec![255, 0, 0, 255]);
+        let result = reg.create_from_rgba("bad", 2, 2, vec![255, 0, 0, 255]);
         assert!(result.is_err());
         assert!(reg.get("bad").is_none());
     }
@@ -209,7 +223,7 @@ mod tests {
     #[test]
     fn rgba_dimension_too_large_rejected() {
         let mut reg = ImageRegistry::new();
-        let result = reg.create_from_rgba("huge".to_string(), 16385, 1, vec![0; 16385 * 4]);
+        let result = reg.create_from_rgba("huge", 16385, 1, vec![0; 16385 * 4]);
         assert!(result.is_err());
         assert!(reg.get("huge").is_none());
     }
@@ -218,10 +232,7 @@ mod tests {
     fn rgba_valid_dimensions_accepted() {
         let mut reg = ImageRegistry::new();
         // 2x2 RGBA = 16 bytes
-        assert!(
-            reg.create_from_rgba("ok".to_string(), 2, 2, vec![0; 16])
-                .is_ok()
-        );
+        assert!(reg.create_from_rgba("ok", 2, 2, vec![0; 16]).is_ok());
         assert!(reg.get("ok").is_some());
     }
 
