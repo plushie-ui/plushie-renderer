@@ -208,9 +208,14 @@ impl Codec {
 // Msgpack nesting depth pre-check
 // ---------------------------------------------------------------------------
 
-/// Iteratively scan raw msgpack bytes and reject if container nesting exceeds
-/// `max_depth`. This runs before `rmpv::read_value` (which recurses without
-/// a depth limit) to prevent stack overflow from maliciously crafted payloads.
+/// Iteratively scan raw msgpack bytes and reject payloads that would cause
+/// problems for `rmpv::read_value`:
+///
+/// - **Nesting depth** exceeding `max_depth` (prevents stack overflow from
+///   rmpv's recursive parser).
+/// - **Declared element counts** exceeding the remaining bytes (prevents
+///   rmpv from pre-allocating `Vec::with_capacity(billions)` when the
+///   declared count is larger than the payload can possibly contain).
 fn check_msgpack_depth(bytes: &[u8], max_depth: usize) -> Result<(), String> {
     let len = bytes.len();
     let mut pos: usize = 0;
@@ -391,6 +396,16 @@ fn check_msgpack_depth(bytes: &[u8], max_depth: usize) -> Result<(), String> {
         pos += skip;
 
         if children > 0 {
+            // Each child element needs at least 1 byte. Reject declared
+            // counts that exceed the remaining data to prevent rmpv from
+            // pre-allocating huge Vecs based on a forged count field.
+            let remaining_bytes = len.saturating_sub(pos);
+            if children > remaining_bytes {
+                return Err(format!(
+                    "msgpack container declares {children} elements but only {remaining_bytes} bytes remain"
+                ));
+            }
+
             depth += 1;
             if depth > max_depth {
                 return Err(format!("msgpack nesting depth exceeds limit ({max_depth})"));
@@ -1109,23 +1124,20 @@ mod tests {
 
     #[test]
     fn msgpack_depth_check_truncated_payload_does_not_panic() {
-        // Truncated payloads should return Ok (not panic). rmpv::read_value
-        // handles truncation errors separately; the depth check only needs
-        // to catch pathological nesting.
+        // Truncated payloads must not panic. They may return Ok (for
+        // scalars or truncated length fields) or Err (for containers
+        // whose declared count exceeds remaining bytes).
         let val = json!({"a": {"b": [1, 2, 3]}});
         let bytes = rmp_serde::to_vec_named(&val).unwrap();
-        // Truncate at various points
         for cut in [1, 3, 5, bytes.len() / 2] {
-            let truncated = &bytes[..cut];
-            // Must not panic, result doesn't matter
-            let _ = check_msgpack_depth(truncated, 128);
+            let _ = check_msgpack_depth(&bytes[..cut], 128);
         }
-        // Also test with a single byte of each container type
-        assert!(check_msgpack_depth(&[0x81], 128).is_ok()); // fixmap(1)
-        assert!(check_msgpack_depth(&[0x91], 128).is_ok()); // fixarray(1)
-        // Truncated length fields
-        assert!(check_msgpack_depth(&[0xdc], 128).is_ok()); // array16, no length
-        assert!(check_msgpack_depth(&[0xde, 0x00], 128).is_ok()); // map16, partial
+        // Truncated containers: declared children > 0 remaining bytes
+        assert!(check_msgpack_depth(&[0x81], 128).is_err()); // fixmap(1): 2 children, 0 bytes
+        assert!(check_msgpack_depth(&[0x91], 128).is_err()); // fixarray(1): 1 child, 0 bytes
+        // Truncated length fields: loop breaks before parsing children
+        assert!(check_msgpack_depth(&[0xdc], 128).is_ok()); // array16, no length bytes
+        assert!(check_msgpack_depth(&[0xde, 0x00], 128).is_ok()); // map16, partial length
     }
 
     #[test]
@@ -1139,5 +1151,31 @@ mod tests {
         let val = json!(42);
         let bytes = rmp_serde::to_vec_named(&val).unwrap();
         assert!(check_msgpack_depth(&bytes, 0).is_ok());
+    }
+
+    #[test]
+    fn msgpack_depth_check_rejects_forged_element_count() {
+        // map32 declaring 2^32-1 entries but only a few bytes of actual
+        // data. Without the element count check, rmpv::read_value would
+        // try Vec::with_capacity(4 billion) and OOM.
+        let mut bytes = vec![0xdf]; // map32 marker
+        bytes.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // 4 billion entries
+        bytes.extend_from_slice(&[0xa1, b'k', 0x01]); // one tiny key-value pair
+
+        let result = check_msgpack_depth(&bytes, 128);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("elements"));
+    }
+
+    #[test]
+    fn msgpack_decode_rejects_forged_element_count() {
+        // Verify the full decode path rejects forged counts.
+        let mut bytes = vec![0xdd]; // array32 marker
+        bytes.extend_from_slice(&0x7FFF_FFFFu32.to_be_bytes()); // 2 billion entries
+        bytes.push(0x01); // one element
+
+        let result: Result<serde_json::Value, _> = Codec::MsgPack.decode(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("elements"));
     }
 }
