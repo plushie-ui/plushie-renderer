@@ -11,3 +11,16 @@ repository = "https://github.com/julep-ui/julep"
 authors = ["Daniel Hedlund <daniel@digitree.org>"]
 keywords = ["gui", "desktop", "renderer", "native", "iced"]
 categories = ["gui", "rendering"]
+
+[patch.crates-io]
+julep-iced = { path = "../julep-iced" }
+julep-iced-core = { path = "../julep-iced/core" }
+julep-iced-futures = { path = "../julep-iced/futures" }
+julep-iced-renderer = { path = "../julep-iced/renderer" }
+julep-iced-runtime = { path = "../julep-iced/runtime" }
+julep-iced-widget = { path = "../julep-iced/widget" }
+julep-iced-winit = { path = "../julep-iced/winit" }
+julep-iced-wgpu = { path = "../julep-iced/wgpu" }
+julep-iced-tiny-skia = { path = "../julep-iced/tiny_skia" }
+julep-iced-test = { path = "../julep-iced/test" }
+julep-iced-highlighter = { path = "../julep-iced/highlighter" }

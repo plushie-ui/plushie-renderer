@@ -192,12 +192,31 @@ fn ensure_caches_walk(
         }
         "markdown" => {
             let props = node.props.as_object();
-            let content = prop_str(props, "content").unwrap_or_default();
-            let hash = hash_str(&content);
+            let content_str = prop_str(props, "content").unwrap_or_default();
+            let code_theme_str = prop_str(props, "code_theme").unwrap_or_default();
+            let hash = hash_str(&format!("{content_str}\0{code_theme_str}"));
             match caches.markdown_items.get(&node.id) {
                 Some((existing_hash, _)) if *existing_hash == hash => {}
                 _ => {
-                    let items: Vec<_> = markdown::parse(&content).collect();
+                    let code_theme = match code_theme_str.as_str() {
+                        "base16_mocha" => Some(iced::highlighter::Theme::Base16Mocha),
+                        "base16_ocean" => Some(iced::highlighter::Theme::Base16Ocean),
+                        "base16_eighties" => Some(iced::highlighter::Theme::Base16Eighties),
+                        "solarized_dark" => Some(iced::highlighter::Theme::SolarizedDark),
+                        "inspired_github" => Some(iced::highlighter::Theme::InspiredGitHub),
+                        "" => None,
+                        other => {
+                            log::warn!("unknown code_theme {:?}, using default", other);
+                            None
+                        }
+                    };
+                    let items: Vec<_> = if let Some(theme) = code_theme {
+                        let mut md = markdown::Content::new().code_theme(theme);
+                        md.push_str(&content_str);
+                        md.items().to_vec()
+                    } else {
+                        markdown::parse(&content_str).collect()
+                    };
                     caches.markdown_items.insert(node.id.clone(), (hash, items));
                 }
             }

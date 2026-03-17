@@ -1012,6 +1012,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "cryoglyph"
+version = "0.1.0"
+source = "git+https://github.com/iced-rs/cryoglyph.git?rev=1d68895e9c4c9b73739f826e81c2e3012c155cce#1d68895e9c4c9b73739f826e81c2e3012c155cce"
+dependencies = [
+ "cosmic-text",
+ "etagere",
+ "lru",
+ "rustc-hash 2.1.1",
+ "wgpu",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2073,8 +2085,6 @@ dependencies = [
 [[package]]
 name = "julep-iced"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f40ba6750348cb58908c6fa73b4d2089f346d3f8f7267e28351f831b8f75fd6a"
 dependencies = [
  "image",
  "julep-iced-core",
@@ -2091,8 +2101,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-core"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bce3ed37f1a731eea38c95c2fbdd122ed977e75dba927a86d8af56b24e947e3"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -2107,23 +2115,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "julep-iced-cryoglyph"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9fa6a435fa504f31b03579e02fbf775c4e55067f1416124fa86fcecdeff64ac"
-dependencies = [
- "cosmic-text",
- "etagere",
- "lru",
- "rustc-hash 2.1.1",
- "wgpu",
-]
-
-[[package]]
 name = "julep-iced-debug"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c56c306541f24cb9bb48ac5ad75a8664781c8b2ca60e0ea94ff0cb6598cd740"
 dependencies = [
  "julep-iced-core",
  "julep-iced-futures",
@@ -2133,8 +2126,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-futures"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9628d8d284b8f738c63a79f942aedcca0bd9b8cf9b02f030ad3cc3e1fa30398"
 dependencies = [
  "futures",
  "julep-iced-core",
@@ -2148,8 +2139,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-graphics"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d89710f67725a0d34d0b1596779fcdd8f5d05185c555c8a990a294a7b713de"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -2170,8 +2159,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-highlighter"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c9e0fab09d16d23edfb5071ad5a8444d228ba4fc2777b3b4194386bd2ad610e"
 dependencies = [
  "julep-iced-core",
  "two-face",
@@ -2180,8 +2167,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-program"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b47facf10c47147ec84ab07300b7aafb24d58121e1c0fdc3545175d7f54f122e"
 dependencies = [
  "julep-iced-graphics",
  "julep-iced-runtime",
@@ -2190,8 +2175,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-renderer"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff168b368fecad152256dafafff9498ccbfb6f30670f91a610b99194e8a4a0b8"
 dependencies = [
  "julep-iced-graphics",
  "julep-iced-tiny-skia",
@@ -2203,8 +2186,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-runtime"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4eb560f1a5d0ae0d6a40bf01219f6fd0e28ebc5548a2ebe2e1f4ab4af20e1f"
 dependencies = [
  "bytes",
  "julep-iced-core",
@@ -2216,8 +2197,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-selector"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51338e7673a10fee614f03fecee0d7e47319b9a598144973c3d0c00266608284"
 dependencies = [
  "julep-iced-core",
 ]
@@ -2225,8 +2204,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-test"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abf4e22d72da291c02a86a34e6692416282276cca0a24906ca561d2972272d4c"
 dependencies = [
  "julep-iced-futures",
  "julep-iced-program",
@@ -2242,8 +2219,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-tiny-skia"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d1b67540f9751a311c0d15ab385b636d5f61a18290d7a7cee81fcde1b410ee2"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -2260,15 +2235,13 @@ dependencies = [
 [[package]]
 name = "julep-iced-wgpu"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d78edce8069f1617a2d581a99747edaed8c9885c656297ccefae573e42929dd8"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
+ "cryoglyph",
  "futures",
  "glam",
  "guillotiere",
- "julep-iced-cryoglyph",
  "julep-iced-debug",
  "julep-iced-graphics",
  "log",
@@ -2282,8 +2255,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-widget"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2c71194a690c97ca43d4b9f8161c52cd0b0f151fea126e0cbcadca8c1aab816"
 dependencies = [
  "julep-iced-highlighter",
  "julep-iced-renderer",
@@ -2298,8 +2269,6 @@ dependencies = [
 [[package]]
 name = "julep-iced-winit"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64ac6af9dbe314ae79fb6c92dadd1a9d3c355494e2ce0685296cda146195b187"
 dependencies = [
  "accesskit",
  "accesskit_winit",

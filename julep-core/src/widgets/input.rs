@@ -24,6 +24,21 @@ pub(crate) fn render_text_input<'a>(
         .padding(padding)
         .secure(secure);
 
+    if let Some(purpose_str) = prop_str(props, "ime_purpose") {
+        let purpose = match purpose_str.as_str() {
+            "terminal" => Some(iced::advanced::input_method::Purpose::Terminal),
+            "secure" => Some(iced::advanced::input_method::Purpose::Secure),
+            "normal" => Some(iced::advanced::input_method::Purpose::Normal),
+            _ => {
+                log::warn!("unknown ime_purpose {:?}, ignoring", purpose_str);
+                None
+            }
+        };
+        if let Some(p) = purpose {
+            ti = ti.input_purpose(p);
+        }
+    }
+
     if let Some(s) = size {
         ti = ti.size(s);
     }
@@ -574,6 +589,21 @@ pub(crate) fn render_text_editor<'a>(
         } else {
             None
         };
+
+    if let Some(purpose_str) = prop_str(props, "ime_purpose") {
+        let purpose = match purpose_str.as_str() {
+            "terminal" => Some(iced::advanced::input_method::Purpose::Terminal),
+            "secure" => Some(iced::advanced::input_method::Purpose::Secure),
+            "normal" => Some(iced::advanced::input_method::Purpose::Normal),
+            _ => {
+                log::warn!("unknown ime_purpose {:?}, ignoring", purpose_str);
+                None
+            }
+        };
+        if let Some(p) = purpose {
+            te = te.input_purpose(p);
+        }
+    }
 
     let wid = widget::Id::from(node.id.clone());
 
