@@ -1,3 +1,6 @@
+//! Stdin I/O: initial settings reader, background reader thread, and
+//! the iced subscription that bridges stdin events into the update loop.
+
 use std::io::{self, BufRead, Read, Write};
 use std::sync::Mutex;
 use std::thread;
@@ -9,6 +12,25 @@ use julep_core::codec::Codec;
 use julep_core::message::StdinEvent;
 use julep_core::protocol::IncomingMessage;
 use serde_json::Value;
+
+/// Default return value for `read_initial_settings` error paths.
+/// Returns empty settings, default iced config, no fonts, and the
+/// reader (so the caller can still spawn the stdin thread).
+fn empty_settings(
+    reader: io::BufReader<io::Stdin>,
+) -> (
+    Value,
+    iced::Settings,
+    Vec<Vec<u8>>,
+    io::BufReader<io::Stdin>,
+) {
+    (
+        Value::Object(Default::default()),
+        iced::Settings::default(),
+        Vec::new(),
+        reader,
+    )
+}
 
 /// One-shot slot for the stdin receiver. The subscription takes it once on
 /// first call. Uses a Mutex because `Subscription::run` requires `fn() -> Stream`
@@ -108,12 +130,7 @@ pub(crate) fn read_initial_settings(
                 Err(e) => {
                     log::error!("stdin closed before settings received: {e}");
                     Codec::set_global(Codec::MsgPack);
-                    return (
-                        Value::Object(Default::default()),
-                        iced::Settings::default(),
-                        Vec::new(),
-                        reader,
-                    );
+                    return empty_settings(reader);
                 }
             }
             (Codec::detect_from_first_byte(first[0]), Some(first[0]))
@@ -131,12 +148,7 @@ pub(crate) fn read_initial_settings(
                 let mut rest = [0u8; 3];
                 if let Err(e) = reader.read_exact(&mut rest) {
                     log::error!("failed to read initial settings: {e}");
-                    return (
-                        Value::Object(Default::default()),
-                        iced::Settings::default(),
-                        Vec::new(),
-                        reader,
-                    );
+                    return empty_settings(reader);
                 }
                 let len = u32::from_be_bytes([byte, rest[0], rest[1], rest[2]]) as usize;
                 if len == 0 || len > julep_core::codec::MAX_MESSAGE_SIZE {
@@ -145,22 +157,12 @@ pub(crate) fn read_initial_settings(
                          limit {} bytes)",
                         julep_core::codec::MAX_MESSAGE_SIZE
                     );
-                    return (
-                        Value::Object(Default::default()),
-                        iced::Settings::default(),
-                        Vec::new(),
-                        reader,
-                    );
+                    return empty_settings(reader);
                 }
                 let mut payload = vec![0u8; len];
                 if let Err(e) = reader.read_exact(&mut payload) {
                     log::error!("failed to read initial settings payload: {e}");
-                    return (
-                        Value::Object(Default::default()),
-                        iced::Settings::default(),
-                        Vec::new(),
-                        reader,
-                    );
+                    return empty_settings(reader);
                 }
                 payload
             }
@@ -171,12 +173,7 @@ pub(crate) fn read_initial_settings(
                 let limit = (julep_core::codec::MAX_MESSAGE_SIZE + 1) as u64;
                 if let Err(e) = (&mut reader).take(limit).read_line(&mut line) {
                     log::error!("failed to read initial settings: {e}");
-                    return (
-                        Value::Object(Default::default()),
-                        iced::Settings::default(),
-                        Vec::new(),
-                        reader,
-                    );
+                    return empty_settings(reader);
                 }
                 let full = format!("{}{}", byte as char, line.trim());
                 full.into_bytes()
@@ -188,21 +185,11 @@ pub(crate) fn read_initial_settings(
             Ok(Some(bytes)) => bytes,
             Ok(None) => {
                 log::error!("stdin closed before settings received");
-                return (
-                    Value::Object(Default::default()),
-                    iced::Settings::default(),
-                    Vec::new(),
-                    reader,
-                );
+                return empty_settings(reader);
             }
             Err(e) => {
                 log::error!("failed to read initial settings: {e}");
-                return (
-                    Value::Object(Default::default()),
-                    iced::Settings::default(),
-                    Vec::new(),
-                    reader,
-                );
+                return empty_settings(reader);
             }
         }
     };
@@ -349,12 +336,7 @@ pub(crate) fn read_initial_settings(
                 IncomingMessage::AdvanceFrame { .. } => "advance_frame",
             };
             log::error!("expected settings as first message, got {variant}");
-            (
-                Value::Object(Default::default()),
-                iced::Settings::default(),
-                Vec::new(),
-                reader,
-            )
+            empty_settings(reader)
         }
     }
 }
