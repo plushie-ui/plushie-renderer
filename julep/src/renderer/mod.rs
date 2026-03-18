@@ -1521,14 +1521,7 @@ impl App {
                     width,
                     height,
                 } => {
-                    self.handle_image_op(
-                        &op,
-                        &handle,
-                        data.as_deref(),
-                        pixels.as_deref(),
-                        width,
-                        height,
-                    );
+                    self.handle_image_op(&op, &handle, data, pixels, width, height);
                 }
                 julep_core::engine::CoreEffect::ExtensionConfig(config) => {
                     self.dispatcher.init_all(&config);
@@ -1606,7 +1599,7 @@ pub(crate) fn run(builder: julep_core::app::JulepAppBuilder) -> iced::Result {
 
     {
         if args.contains(&"--headless".to_string()) {
-            crate::headless::headless_mode::run(forced_codec, builder.build_dispatcher());
+            crate::headless::run(forced_codec, builder.build_dispatcher());
             return Ok(());
         }
     }

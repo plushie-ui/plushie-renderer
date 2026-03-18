@@ -309,38 +309,15 @@ impl App {
         &mut self,
         op: &str,
         handle: &str,
-        data: Option<&[u8]>,
-        pixels: Option<&[u8]>,
+        data: Option<Vec<u8>>,
+        pixels: Option<Vec<u8>>,
         width: Option<u32>,
         height: Option<u32>,
     ) {
-        let result = match op {
-            "create_image" | "update_image" => {
-                if let Some(pixel_bytes) = pixels {
-                    // RGBA pixel data (raw bytes, no base64 decode needed)
-                    let w = width.unwrap_or(0);
-                    let h = height.unwrap_or(0);
-                    self.image_registry
-                        .create_from_rgba(handle, w, h, pixel_bytes.to_vec())
-                } else if let Some(image_bytes) = data {
-                    // Encoded image bytes (PNG, JPEG, etc. -- raw bytes)
-                    self.image_registry
-                        .create_from_bytes(handle, image_bytes.to_vec())
-                } else {
-                    log::warn!("image_op {op}: missing data or pixels field");
-                    Err(format!("image_op {op}: missing data or pixels field"))
-                }
-            }
-            "delete_image" => {
-                self.image_registry.delete(handle);
-                Ok(())
-            }
-            other => {
-                log::warn!("unknown image_op: {other}");
-                Err(format!("unknown image_op: {other}"))
-            }
-        };
-        if let Err(error) = result {
+        if let Err(error) = self
+            .image_registry
+            .apply_op(op, handle, data, pixels, width, height)
+        {
             emit_event(OutgoingEvent::generic(
                 "image_error".to_string(),
                 handle.to_string(),

@@ -155,6 +155,41 @@ impl ImageRegistry {
     pub fn clear(&mut self) {
         self.handles.clear();
     }
+
+    /// Dispatch an image operation by name.
+    ///
+    /// Supported ops:
+    /// - `"create_image"` / `"update_image"` -- create or replace an image
+    ///   from raw RGBA `pixels` or encoded `data` (PNG, JPEG, etc.).
+    /// - `"delete_image"` -- remove the named image.
+    pub fn apply_op(
+        &mut self,
+        op: &str,
+        handle: &str,
+        data: Option<Vec<u8>>,
+        pixels: Option<Vec<u8>>,
+        width: Option<u32>,
+        height: Option<u32>,
+    ) -> Result<(), String> {
+        match op {
+            "create_image" | "update_image" => {
+                if let Some(pixel_bytes) = pixels {
+                    let w = width.unwrap_or(0);
+                    let h = height.unwrap_or(0);
+                    self.create_from_rgba(handle, w, h, pixel_bytes)
+                } else if let Some(image_bytes) = data {
+                    self.create_from_bytes(handle, image_bytes)
+                } else {
+                    Err(format!("image_op {op}: missing data or pixels field"))
+                }
+            }
+            "delete_image" => {
+                self.delete(handle);
+                Ok(())
+            }
+            other => Err(format!("unknown image_op: {other}")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -275,5 +310,78 @@ mod tests {
     #[test]
     fn sniff_too_short() {
         assert_eq!(sniff_image_format(&[0x89, 0x50]), None);
+    }
+
+    // -- apply_op -------------------------------------------------------------
+
+    #[test]
+    fn apply_op_create_from_pixels() {
+        let mut reg = ImageRegistry::new();
+        assert!(
+            reg.apply_op(
+                "create_image",
+                "img",
+                None,
+                Some(vec![0; 4]),
+                Some(1),
+                Some(1)
+            )
+            .is_ok()
+        );
+        assert!(reg.get("img").is_some());
+    }
+
+    #[test]
+    fn apply_op_create_from_data() {
+        let mut reg = ImageRegistry::new();
+        assert!(
+            reg.apply_op(
+                "create_image",
+                "img",
+                Some(vec![0x89, 0x50, 0x4e, 0x47]),
+                None,
+                None,
+                None
+            )
+            .is_ok()
+        );
+        assert!(reg.get("img").is_some());
+    }
+
+    #[test]
+    fn apply_op_update_replaces() {
+        let mut reg = ImageRegistry::new();
+        let _ = reg.apply_op("create_image", "img", Some(vec![1]), None, None, None);
+        let _ = reg.apply_op("update_image", "img", Some(vec![2]), None, None, None);
+        assert!(reg.get("img").is_some());
+    }
+
+    #[test]
+    fn apply_op_delete() {
+        let mut reg = ImageRegistry::new();
+        let _ = reg.apply_op("create_image", "img", Some(vec![1]), None, None, None);
+        assert!(
+            reg.apply_op("delete_image", "img", None, None, None, None)
+                .is_ok()
+        );
+        assert!(reg.get("img").is_none());
+    }
+
+    #[test]
+    fn apply_op_missing_data_and_pixels() {
+        let mut reg = ImageRegistry::new();
+        assert!(
+            reg.apply_op("create_image", "img", None, None, None, None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn apply_op_unknown_op() {
+        let mut reg = ImageRegistry::new();
+        assert!(
+            reg.apply_op("rotate_image", "img", None, None, None, None)
+                .is_err()
+        );
     }
 }
