@@ -77,6 +77,9 @@ pub struct Core {
     pub cached_theme: Option<iced::Theme>,
     /// Raw JSON of the last resolved theme prop, used for change detection.
     cached_theme_json: Option<String>,
+    /// True after the first Settings message has been applied. Used to
+    /// suppress warnings about startup-only fields on the initial Settings.
+    settings_applied: bool,
 }
 
 impl Default for Core {
@@ -95,6 +98,7 @@ impl Core {
             default_font: None,
             cached_theme: None,
             cached_theme_json: None,
+            settings_applied: false,
         }
     }
 
@@ -232,16 +236,20 @@ impl Core {
                     log::error!("no protocol_version in Settings, assuming compatible");
                 }
 
-                // Startup-only fields cannot be changed after the iced
-                // daemon has started. Warn so hosts notice the no-op.
-                for field in &["antialiasing", "vsync", "fonts", "scale_factor"] {
-                    if settings.get(*field).is_some() {
-                        log::warn!(
-                            "Settings field `{field}` is startup-only; \
-                             ignored after the daemon has started"
-                        );
+                // Startup-only fields are extracted by run.rs before the
+                // daemon starts. Subsequent Settings messages can't change
+                // them -- warn so hosts notice the no-op.
+                if self.settings_applied {
+                    for field in &["antialiasing", "vsync", "fonts", "scale_factor"] {
+                        if settings.get(*field).is_some() {
+                            log::warn!(
+                                "Settings field `{field}` is startup-only; \
+                                 ignored after the daemon has started"
+                            );
+                        }
                     }
                 }
+                self.settings_applied = true;
 
                 self.default_text_size = settings
                     .get("default_text_size")
