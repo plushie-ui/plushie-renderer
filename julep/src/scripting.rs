@@ -22,7 +22,9 @@ use serde_json::Value;
 
 use julep_core::codec::Codec;
 use julep_core::engine::Core;
-use julep_core::protocol::{InteractResponse, QueryResponse, ResetResponse, TreeNode};
+use julep_core::protocol::{
+    InteractResponse, OutgoingEvent, QueryResponse, ResetResponse, TreeNode,
+};
 
 /// Maximum tree search recursion depth (matches MAX_TREE_DEPTH in widgets.rs).
 const MAX_SEARCH_DEPTH: usize = 256;
@@ -327,30 +329,13 @@ pub(crate) fn interaction_to_iced_events(
 // ---------------------------------------------------------------------------
 
 /// Write a serialized response to stdout using the negotiated wire codec.
-pub(crate) fn emit_wire<T: serde::Serialize>(value: &T) {
+pub(crate) fn emit_wire<T: serde::Serialize>(value: &T) -> io::Result<()> {
     let codec = Codec::get_global();
-    match codec.encode(value) {
-        Ok(bytes) => {
-            let stdout = io::stdout();
-            let mut handle = stdout.lock();
-            if let Err(e) = handle.write_all(&bytes) {
-                if e.kind() == io::ErrorKind::BrokenPipe {
-                    log::error!("stdout broken pipe -- shutting down");
-                    std::process::exit(0);
-                }
-                log::error!("stdout write error: {e}");
-                return;
-            }
-            if let Err(e) = handle.flush() {
-                if e.kind() == io::ErrorKind::BrokenPipe {
-                    log::error!("stdout broken pipe on flush -- shutting down");
-                    std::process::exit(0);
-                }
-                log::error!("stdout flush error: {e}");
-            }
-        }
-        Err(e) => log::error!("encode error: {e}"),
-    }
+    let bytes = codec.encode(value).map_err(io::Error::other)?;
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    handle.write_all(&bytes)?;
+    handle.flush()
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +489,12 @@ pub(crate) fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Handle a Query message: serialize tree or find a widget by selector.
-pub(crate) fn handle_query(core: &Core, id: String, target: String, selector: Value) {
+pub(crate) fn handle_query(
+    core: &Core,
+    id: String,
+    target: String,
+    selector: Value,
+) -> io::Result<()> {
     let data = match target.as_str() {
         "tree" => match core.tree.root() {
             Some(root) => serde_json::to_value(root).unwrap_or(Value::Null),
@@ -524,7 +514,7 @@ pub(crate) fn handle_query(core: &Core, id: String, target: String, selector: Va
         }
     };
 
-    emit_wire(&QueryResponse::new(id, target, data));
+    emit_wire(&QueryResponse::new(id, target, data))
 }
 
 /// Resolve a selector to a widget ID without emitting anything.
@@ -555,72 +545,62 @@ pub(crate) fn handle_interact(
     action: String,
     selector: Value,
     payload: Value,
-) {
+) -> io::Result<()> {
     let widget_id = resolve_widget_id(core, &selector);
 
-    let events = match (action.as_str(), widget_id) {
+    let events: Vec<OutgoingEvent> = match (action.as_str(), widget_id) {
         ("click", Some(wid)) => {
-            vec![serde_json::json!({"type": "event", "event": "click", "id": wid})]
+            vec![OutgoingEvent::click(wid)]
         }
         ("type_text", Some(wid)) => {
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            vec![serde_json::json!({"type": "event", "event": "input", "id": wid, "value": text})]
+            vec![OutgoingEvent::input(wid, text.to_string())]
         }
         ("submit", Some(wid)) => {
             let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            vec![serde_json::json!({"type": "event", "event": "submit", "id": wid, "value": value})]
+            vec![OutgoingEvent::submit(wid, value.to_string())]
         }
         ("toggle", Some(wid)) => {
             let value = payload
                 .get("value")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            vec![serde_json::json!({"type": "event", "event": "toggle", "id": wid, "value": value})]
+            vec![OutgoingEvent::toggle(wid, value)]
         }
         ("select", Some(wid)) => {
             let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            vec![serde_json::json!({"type": "event", "event": "select", "id": wid, "value": value})]
+            vec![OutgoingEvent::select(wid, value.to_string())]
         }
         ("slide", Some(wid)) => {
             let value = payload.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![serde_json::json!({"type": "event", "event": "slide", "id": wid, "value": value})]
+            vec![OutgoingEvent::slide(wid, value)]
         }
         ("press", _) => {
             let payload_map = payload.as_object();
             let (key, modifiers) = parse_key_and_modifiers(payload_map);
-            vec![serde_json::json!({
-                "type": "event", "event": "key_press", "id": "", "key": key, "modifiers": modifiers
-            })]
+            vec![OutgoingEvent::scripting_key_press(key, modifiers)]
         }
         ("release", _) => {
             let payload_map = payload.as_object();
             let (key, modifiers) = parse_key_and_modifiers(payload_map);
-            vec![serde_json::json!({
-                "type": "event", "event": "key_release", "id": "", "key": key, "modifiers": modifiers
-            })]
+            vec![OutgoingEvent::scripting_key_release(key, modifiers)]
         }
         ("move_to", _) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![serde_json::json!({
-                "type": "event", "event": "cursor_moved", "id": "", "x": x, "y": y
-            })]
+            vec![OutgoingEvent::scripting_cursor_moved(x, y)]
         }
         ("type_key", _) => {
             let payload_map = payload.as_object();
             let (key, modifiers) = parse_key_and_modifiers(payload_map);
             vec![
-                serde_json::json!({
-                    "type": "event", "event": "key_press", "id": "", "key": key, "modifiers": modifiers
-                }),
-                serde_json::json!({
-                    "type": "event", "event": "key_release", "id": "", "key": key, "modifiers": modifiers
-                }),
+                OutgoingEvent::scripting_key_press(key.clone(), modifiers.clone()),
+                OutgoingEvent::scripting_key_release(key, modifiers),
             ]
         }
         ("paste", Some(wid)) => {
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            vec![serde_json::json!({"type": "event", "event": "paste", "id": wid, "value": text})]
+            vec![OutgoingEvent::paste(wid, text.to_string())]
         }
         ("scroll", _) => {
             let delta_x = payload
@@ -631,37 +611,45 @@ pub(crate) fn handle_interact(
                 .get("delta_y")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
-            vec![serde_json::json!({
-                "type": "event", "event": "scroll", "id": "", "delta_x": delta_x, "delta_y": delta_y
-            })]
+            vec![OutgoingEvent::scripting_scroll(delta_x, delta_y)]
         }
         ("sort", Some(wid)) => {
             let column = payload.get("column").and_then(|v| v.as_str()).unwrap_or("");
-            vec![serde_json::json!({"type": "event", "event": "sort", "id": wid, "value": column})]
+            vec![OutgoingEvent::generic(
+                "sort",
+                wid,
+                Some(serde_json::json!({"column": column})),
+            )]
         }
         ("pane_focus_cycle", Some(wid)) => {
-            vec![serde_json::json!({"type": "event", "event": "pane_focus_cycle", "id": wid})]
+            vec![OutgoingEvent::generic("pane_focus_cycle", wid, None)]
         }
         ("canvas_press", Some(wid)) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![serde_json::json!({
-                "type": "event", "event": "canvas_press", "id": wid, "x": x, "y": y
-            })]
+            vec![OutgoingEvent::generic(
+                "canvas_press",
+                wid,
+                Some(serde_json::json!({"x": x, "y": y})),
+            )]
         }
         ("canvas_release", Some(wid)) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![serde_json::json!({
-                "type": "event", "event": "canvas_release", "id": wid, "x": x, "y": y
-            })]
+            vec![OutgoingEvent::generic(
+                "canvas_release",
+                wid,
+                Some(serde_json::json!({"x": x, "y": y})),
+            )]
         }
         ("canvas_move", Some(wid)) => {
             let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            vec![serde_json::json!({
-                "type": "event", "event": "canvas_move", "id": wid, "x": x, "y": y
-            })]
+            vec![OutgoingEvent::generic(
+                "canvas_move",
+                wid,
+                Some(serde_json::json!({"x": x, "y": y})),
+            )]
         }
         _ => {
             log::warn!("unknown action '{action}' or widget not found");
@@ -669,17 +657,17 @@ pub(crate) fn handle_interact(
         }
     };
 
-    emit_wire(&InteractResponse::new(id, events));
+    emit_wire(&InteractResponse::new(id, events))
 }
 
 /// Reset core to a blank state and emit the response.
-pub(crate) fn handle_reset(core: &mut Core, id: String) {
+pub(crate) fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
     *core = Core::new();
-    emit_wire(&ResetResponse::ok(id));
+    emit_wire(&ResetResponse::ok(id))
 }
 
 /// Hash the current tree and emit a SnapshotCaptureResponse.
-pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) {
+pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) -> io::Result<()> {
     use julep_core::protocol::SnapshotCaptureResponse;
     use sha2::{Digest, Sha256};
 
@@ -692,7 +680,7 @@ pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) {
     hasher.update(tree_json.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
 
-    emit_wire(&SnapshotCaptureResponse::new(id, name, hash, 0, 0));
+    emit_wire(&SnapshotCaptureResponse::new(id, name, hash, 0, 0))
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +688,7 @@ pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(unused_must_use)]
 mod tests {
     use super::*;
     use julep_core::protocol::TreeNode;

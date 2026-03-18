@@ -475,7 +475,12 @@ impl App {
                         target,
                         selector,
                     } => {
-                        crate::scripting::handle_query(&self.core, id, target, selector);
+                        if let Err(e) =
+                            crate::scripting::handle_query(&self.core, id, target, selector)
+                        {
+                            log::error!("write error: {e}");
+                            return iced::exit();
+                        }
                         Task::none()
                     }
                     IncomingMessage::Interact {
@@ -484,36 +489,23 @@ impl App {
                         selector,
                         payload,
                     } => {
-                        // Emit synthetic julep events (host-managed state).
-                        crate::scripting::handle_interact(
-                            &self.core,
-                            id,
-                            action.clone(),
-                            selector.clone(),
-                            payload.clone(),
-                        );
-
-                        // Inject real iced events (renderer-managed state).
-                        let iced_events = crate::scripting::interaction_to_iced_events(
-                            &action,
-                            None,
-                            &payload,
-                            iced::mouse::Cursor::Unavailable,
-                        );
-                        if let Some((_, &iced_id)) = self.window_map.iter().next()
-                            && !iced_events.is_empty()
-                        {
-                            window::inject_events(iced_id, iced_events).discard()
-                        } else {
-                            Task::none()
+                        if let Err(e) = crate::scripting::handle_interact(
+                            &self.core, id, action, selector, payload,
+                        ) {
+                            log::error!("write error: {e}");
+                            return iced::exit();
                         }
+                        Task::none()
                     }
                     IncomingMessage::Reset { id } => {
                         // Clean up extension state before wiping core.
                         self.dispatcher.reset(&mut self.core.caches.extension);
 
                         // Reset core and emit the response.
-                        crate::scripting::handle_reset(&mut self.core, id);
+                        if let Err(e) = crate::scripting::handle_reset(&mut self.core, id) {
+                            log::error!("write error: {e}");
+                            return iced::exit();
+                        }
 
                         // Close all open windows and clear maps.
                         let close_tasks: Vec<Task<Message>> = self
@@ -537,7 +529,12 @@ impl App {
                         Task::batch(close_tasks)
                     }
                     IncomingMessage::SnapshotCapture { id, name, .. } => {
-                        crate::scripting::handle_snapshot_capture(&self.core, id, name);
+                        if let Err(e) =
+                            crate::scripting::handle_snapshot_capture(&self.core, id, name)
+                        {
+                            log::error!("write error: {e}");
+                            return iced::exit();
+                        }
                         Task::none()
                     }
                     IncomingMessage::ScreenshotCapture { id, name, .. } => {

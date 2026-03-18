@@ -593,6 +593,44 @@ impl OutgoingEvent {
     }
 
     // -----------------------------------------------------------------------
+    // Scripting key events (no full KeyEventData available)
+    // -----------------------------------------------------------------------
+
+    /// Key press event from scripting (no full KeyEventData).
+    pub fn scripting_key_press(key: String, modifiers_json: Value) -> Self {
+        Self {
+            value: Some(Value::String(key)),
+            data: Some(serde_json::json!({"modifiers": modifiers_json})),
+            ..Self::bare("key_press", String::new())
+        }
+    }
+
+    /// Key release event from scripting (no full KeyEventData).
+    pub fn scripting_key_release(key: String, modifiers_json: Value) -> Self {
+        Self {
+            value: Some(Value::String(key)),
+            data: Some(serde_json::json!({"modifiers": modifiers_json})),
+            ..Self::bare("key_release", String::new())
+        }
+    }
+
+    /// Cursor moved event from scripting.
+    pub fn scripting_cursor_moved(x: f64, y: f64) -> Self {
+        Self {
+            data: Some(serde_json::json!({"x": x, "y": y})),
+            ..Self::bare("cursor_moved", String::new())
+        }
+    }
+
+    /// Scroll event from scripting.
+    pub fn scripting_scroll(delta_x: f64, delta_y: f64) -> Self {
+        Self {
+            data: Some(serde_json::json!({"delta_x": delta_x, "delta_y": delta_y})),
+            ..Self::bare("scroll", String::new())
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // ComboBox option hovered event
     // -----------------------------------------------------------------------
 
@@ -741,11 +779,11 @@ pub struct InteractResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
     pub id: String,
-    pub events: Vec<Value>,
+    pub events: Vec<OutgoingEvent>,
 }
 
 impl InteractResponse {
-    pub fn new(id: String, events: Vec<Value>) -> Self {
+    pub fn new(id: String, events: Vec<OutgoingEvent>) -> Self {
         Self {
             message_type: "interact_response",
             id,

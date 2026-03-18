@@ -251,7 +251,12 @@ pub fn run(forced_codec: Option<Codec>, dispatcher: ExtensionDispatcher, mode: M
         match codec.read_message(&mut reader) {
             Ok(None) => break,
             Ok(Some(bytes)) => match codec.decode::<IncomingMessage>(&bytes) {
-                Ok(msg) => handle_message(&mut session, msg),
+                Ok(msg) => {
+                    if let Err(e) = handle_message(&mut session, msg) {
+                        log::error!("write error: {e}");
+                        break;
+                    }
+                }
                 Err(e) => {
                     log::error!("decode error: {e}");
                 }
@@ -266,7 +271,7 @@ pub fn run(forced_codec: Option<Codec>, dispatcher: ExtensionDispatcher, mode: M
     log::info!("stdin closed, exiting");
 }
 
-fn handle_message(s: &mut Session, msg: IncomingMessage) {
+fn handle_message(s: &mut Session, msg: IncomingMessage) -> io::Result<()> {
     let is_snapshot = matches!(msg, IncomingMessage::Snapshot { .. });
     let is_tree_change = is_snapshot || matches!(msg, IncomingMessage::Patch { .. });
     let is_settings = matches!(msg, IncomingMessage::Settings { .. });
@@ -288,10 +293,10 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
                 use julep_core::engine::CoreEffect;
                 match effect {
                     CoreEffect::EmitEvent(event) => {
-                        crate::scripting::emit_wire(&event);
+                        crate::scripting::emit_wire(&event)?;
                     }
                     CoreEffect::EmitEffectResponse(response) => {
-                        crate::scripting::emit_wire(&response);
+                        crate::scripting::emit_wire(&response)?;
                     }
                     CoreEffect::SpawnAsyncEffect {
                         request_id,
@@ -306,7 +311,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
                         crate::scripting::emit_wire(&julep_core::protocol::EffectResponse::error(
                             request_id,
                             "cancelled".to_string(),
-                        ));
+                        ))?;
                     }
                     CoreEffect::ThemeChanged(t) => {
                         s.theme = t;
@@ -360,7 +365,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
             target,
             selector,
         } => {
-            crate::scripting::handle_query(&s.core, id, target, selector);
+            crate::scripting::handle_query(&s.core, id, target, selector)?;
         }
         IncomingMessage::Interact {
             id,
@@ -384,11 +389,11 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
                 s.inject_events(&iced_events);
             }
 
-            // Emit synthetic events back to the host (unchanged behaviour).
-            crate::scripting::handle_interact(&s.core, id, action, selector, payload);
+            // Emit synthetic events back to the host.
+            crate::scripting::handle_interact(&s.core, id, action, selector, payload)?;
         }
         IncomingMessage::SnapshotCapture { id, name, .. } => {
-            crate::scripting::handle_snapshot_capture(&s.core, id, name);
+            crate::scripting::handle_snapshot_capture(&s.core, id, name)?;
         }
         IncomingMessage::ScreenshotCapture {
             id,
@@ -413,7 +418,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
                 ui_state.cursor = mouse::Cursor::Unavailable;
             }
             s.rebuild_renderer();
-            crate::scripting::handle_reset(&mut s.core, id);
+            crate::scripting::handle_reset(&mut s.core, id)?;
         }
         IncomingMessage::ExtensionCommand {
             node_id,
@@ -424,7 +429,7 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
                 .dispatcher
                 .handle_command(&node_id, &op, &payload, &mut s.ext_caches);
             for event in events {
-                crate::scripting::emit_wire(&event);
+                crate::scripting::emit_wire(&event)?;
             }
         }
         IncomingMessage::ExtensionCommandBatch { commands } => {
@@ -436,19 +441,23 @@ fn handle_message(s: &mut Session, msg: IncomingMessage) {
                     &mut s.ext_caches,
                 );
                 for event in events {
-                    crate::scripting::emit_wire(&event);
+                    crate::scripting::emit_wire(&event)?;
                 }
             }
         }
         IncomingMessage::AdvanceFrame { timestamp } => {
             if let Some(tag) = s.core.active_subscriptions.get("on_animation_frame") {
-                crate::scripting::emit_wire(&julep_core::protocol::OutgoingEvent::animation_frame(
-                    tag.clone(),
-                    timestamp as u128,
-                ));
+                crate::scripting::emit_wire(
+                    &julep_core::protocol::OutgoingEvent::animation_frame(
+                        tag.clone(),
+                        timestamp as u128,
+                    ),
+                )?;
             }
         }
     }
+
+    Ok(())
 }
 
 /// Handle a ScreenshotCapture message.
