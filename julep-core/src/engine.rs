@@ -301,8 +301,8 @@ impl Core {
             IncomingMessage::Interact { .. } => {
                 log::debug!("Interact message ignored by Core (handled by scripting layer)");
             }
-            IncomingMessage::SnapshotCapture { .. } => {
-                log::debug!("SnapshotCapture message ignored by Core (handled by scripting layer)");
+            IncomingMessage::TreeHash { .. } => {
+                log::debug!("TreeHash message ignored by Core (handled by scripting layer)");
             }
             IncomingMessage::ScreenshotCapture { .. } => {
                 log::debug!(

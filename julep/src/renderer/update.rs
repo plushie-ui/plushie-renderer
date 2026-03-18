@@ -334,10 +334,8 @@ impl App {
 
                         Task::batch(close_tasks)
                     }
-                    IncomingMessage::SnapshotCapture { id, name, .. } => {
-                        if let Err(e) =
-                            crate::scripting::handle_snapshot_capture(&self.core, id, name)
-                        {
+                    IncomingMessage::TreeHash { id, name, .. } => {
+                        if let Err(e) = crate::scripting::handle_tree_hash(&self.core, id, name) {
                             log::error!("write error: {e}");
                             return iced::exit();
                         }

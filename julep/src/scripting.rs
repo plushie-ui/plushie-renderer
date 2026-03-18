@@ -1,6 +1,6 @@
 //! Protocol helpers for scripting messages.
 //!
-//! Both the daemon and headless modes handle Query/Interact/Reset/SnapshotCapture
+//! Both the daemon and headless modes handle Query/Interact/Reset/TreeHash
 //! messages from stdin. The logic is identical; only the surrounding event loop
 //! differs. This module contains the canonical implementations so the two modes
 //! stay in sync.
@@ -23,8 +23,7 @@ use serde_json::Value;
 use julep_core::codec::Codec;
 use julep_core::engine::Core;
 use julep_core::protocol::{
-    InteractResponse, OutgoingEvent, QueryResponse, ResetResponse, SnapshotCaptureResponse,
-    TreeNode,
+    InteractResponse, OutgoingEvent, QueryResponse, ResetResponse, TreeHashResponse, TreeNode,
 };
 
 /// Maximum tree search recursion depth (matches MAX_TREE_DEPTH in widgets.rs).
@@ -694,12 +693,8 @@ pub(crate) fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
     emit_wire(&build_reset_response(core, id))
 }
 
-/// Build a SnapshotCaptureResponse without writing it anywhere.
-pub(crate) fn build_snapshot_capture_response(
-    core: &Core,
-    id: String,
-    name: String,
-) -> SnapshotCaptureResponse {
+/// Build a TreeHashResponse without writing it anywhere.
+pub(crate) fn build_tree_hash_response(core: &Core, id: String, name: String) -> TreeHashResponse {
     use sha2::{Digest, Sha256};
 
     let tree_json = match core.tree.root() {
@@ -711,12 +706,12 @@ pub(crate) fn build_snapshot_capture_response(
     hasher.update(tree_json.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
 
-    SnapshotCaptureResponse::new(id, name, hash, 0, 0)
+    TreeHashResponse::new(id, name, hash, 0, 0)
 }
 
-/// Build and emit a SnapshotCaptureResponse to stdout.
-pub(crate) fn handle_snapshot_capture(core: &Core, id: String, name: String) -> io::Result<()> {
-    emit_wire(&build_snapshot_capture_response(core, id, name))
+/// Build and emit a TreeHashResponse to stdout.
+pub(crate) fn handle_tree_hash(core: &Core, id: String, name: String) -> io::Result<()> {
+    emit_wire(&build_tree_hash_response(core, id, name))
 }
 
 // ---------------------------------------------------------------------------

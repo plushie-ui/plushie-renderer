@@ -20,7 +20,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub use incoming::{ExtensionCommandItem, IncomingMessage};
 pub use outgoing::{
     EffectResponse, InteractResponse, KeyModifiers, OutgoingEvent, QueryResponse, ResetResponse,
-    SnapshotCaptureResponse,
+    TreeHashResponse,
 };
 pub use types::{PatchOp, TreeNode};
 

@@ -54,11 +54,11 @@ pub enum IncomingMessage {
         #[serde(default)]
         payload: Value,
     },
-    /// Capture a structural tree snapshot (hash of JSON tree).
+    /// Capture a structural tree hash (hash of JSON tree).
     // Used by the binary crate's headless and test modes. Appears dead
     // from julep-core's perspective because the usage is in julep/.
     #[allow(dead_code)]
-    SnapshotCapture {
+    TreeHash {
         id: String,
         name: String,
         #[serde(default)]

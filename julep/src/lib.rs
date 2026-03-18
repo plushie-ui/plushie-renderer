@@ -11,7 +11,7 @@
 //!   only. Stub screenshots. For fast protocol-level testing from
 //!   any language.
 //!
-//! All modes handle scripting messages (Query, Interact, SnapshotCapture,
+//! All modes handle scripting messages (Query, Interact, TreeHash,
 //! ScreenshotCapture, Reset) for programmatic inspection and interaction.
 //!
 //! Wire codec auto-detection: the first byte of stdin determines the format

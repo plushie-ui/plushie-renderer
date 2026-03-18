@@ -97,7 +97,7 @@ pub(crate) fn emit_query_response(
     data: serde_json::Value,
 ) -> io::Result<()> {
     let msg = serde_json::json!({
-        "type": "query_response",
+        "type": "widget_query_response",
         "session": "",
         "kind": kind,
         "tag": tag,

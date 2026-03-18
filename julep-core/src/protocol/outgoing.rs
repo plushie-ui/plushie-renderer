@@ -832,13 +832,13 @@ impl InteractResponse {
     }
 }
 
-/// Response to a SnapshotCapture message.
+/// Response to a TreeHash message.
 ///
-/// Snapshots capture structural tree data (hash of JSON tree). No pixel data.
+/// Tree hashes capture structural tree data (hash of JSON tree). No pixel data.
 /// For pixel data, see the `screenshot_response` message type.
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
-pub struct SnapshotCaptureResponse {
+pub struct TreeHashResponse {
     #[serde(rename = "type")]
     pub message_type: &'static str,
     pub session: String,
@@ -850,10 +850,10 @@ pub struct SnapshotCaptureResponse {
 }
 
 #[allow(dead_code)]
-impl SnapshotCaptureResponse {
+impl TreeHashResponse {
     pub fn new(id: String, name: String, hash: String, width: u32, height: u32) -> Self {
         Self {
-            message_type: "snapshot_response",
+            message_type: "tree_hash_response",
             session: String::new(),
             id,
             name,

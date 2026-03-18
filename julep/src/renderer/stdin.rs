@@ -274,7 +274,7 @@ pub(crate) fn read_initial_settings(
                 IncomingMessage::Settings { .. } => "settings",
                 IncomingMessage::Query { .. } => "query",
                 IncomingMessage::Interact { .. } => "interact",
-                IncomingMessage::SnapshotCapture { .. } => "snapshot_capture",
+                IncomingMessage::TreeHash { .. } => "tree_hash",
                 IncomingMessage::ScreenshotCapture { .. } => "screenshot_capture",
                 IncomingMessage::Reset { .. } => "reset",
                 IncomingMessage::ImageOp { .. } => "image_op",

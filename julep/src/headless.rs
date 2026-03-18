@@ -663,8 +663,8 @@ fn handle_message(
                 julep_core::protocol::InteractResponse::new(id, events).with_session(session_id);
             s.writer.emit(&resp)?;
         }
-        IncomingMessage::SnapshotCapture { id, name, .. } => {
-            let resp = crate::scripting::build_snapshot_capture_response(&s.core, id, name)
+        IncomingMessage::TreeHash { id, name, .. } => {
+            let resp = crate::scripting::build_tree_hash_response(&s.core, id, name)
                 .with_session(session_id);
             s.writer.emit(&resp)?;
         }
