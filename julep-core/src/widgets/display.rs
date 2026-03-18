@@ -491,7 +491,7 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elemen
                     Some("weak") => rule::weak,
                     _ => rule::default,
                 };
-                apply_rule_style(&mut base_fn(theme), &ov.base)
+                apply_rule_style(base_fn(theme), &ov.base)
             });
         }
     }

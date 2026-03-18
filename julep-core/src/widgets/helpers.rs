@@ -1,3 +1,10 @@
+//! Internal widget helpers: parsing, style application, and utilities.
+//!
+//! This module re-exports the public [`prop_helpers`](crate::prop_helpers)
+//! and adds internal-only functions for parsing complex prop types (padding,
+//! fonts, borders, style maps) and applying style overrides to iced widget
+//! styles.
+
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::widget::{
     button, checkbox, container, pick_list, progress_bar, rule, slider, text_editor, text_input,
@@ -571,8 +578,9 @@ pub(crate) fn apply_text_input_fields(style: &mut text_input::Style, fields: &St
     }
 }
 
-/// Apply style map fields to a text_editor style. Same field mapping as
-/// text_input (background, border, text_color -> value).
+/// Apply style map fields to a text_editor style. Mirrors
+/// [`apply_text_input_fields`] -- both style types have the same
+/// background/border/value fields but are distinct iced types.
 pub(crate) fn apply_text_editor_fields(style: &mut text_editor::Style, fields: &StyleMapFields) {
     if let Some(iced::Background::Color(c)) = fields.background {
         style.background = iced::Background::Color(c);
@@ -644,14 +652,14 @@ pub(crate) fn apply_toggler_fields(style: &mut toggler::Style, fields: &StyleMap
 
 /// Apply style map fields to a rule style. Maps background -> color,
 /// border -> radius.
-pub(crate) fn apply_rule_style(style: &mut rule::Style, fields: &StyleMapFields) -> rule::Style {
+pub(crate) fn apply_rule_style(mut style: rule::Style, fields: &StyleMapFields) -> rule::Style {
     if let Some(iced::Background::Color(c)) = fields.background {
         style.color = c;
     }
     if let Some(brd) = fields.border {
         style.radius = brd.radius;
     }
-    *style
+    style
 }
 
 /// Apply style map fields to a checkbox style. Background is `Background::Color`,
