@@ -1,9 +1,16 @@
-//! Canvas widget: 2D drawing surface with per-layer caching.
+//! Canvas widget -- 2D drawing surface with per-layer caching.
 //!
-//! Renders shapes (rect, circle, line, arc, path, text, image) from
-//! JSON prop data. Supports multiple named layers with content-hash
-//! invalidation, gradient fills, clipping regions, and optional mouse
-//! event handlers.
+//! Renders shapes from JSON prop data onto an iced canvas. Supports:
+//!
+//! - **Shapes**: rect, circle, line, arc, path (with SVG-like commands),
+//!   text, image
+//! - **Layers**: multiple named layers with independent content-hash
+//!   invalidation for efficient re-tessellation
+//! - **Fills**: solid colors, linear/radial gradients, fill rules
+//! - **Strokes**: color, width, line cap/join, dash patterns
+//! - **Clipping**: push_clip/pop_clip regions for masked rendering
+//! - **Events**: optional press, release, move, scroll handlers with
+//!   canvas-local coordinates
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;

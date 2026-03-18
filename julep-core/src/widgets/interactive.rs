@@ -1,5 +1,13 @@
-//! Interactive wrapper widgets: button, mouse_area, sensor, tooltip,
-//! themer, window, and overlay.
+//! Interactive wrapper widgets -- add behavior to child content.
+//!
+//! - `button` -- clickable wrapper with press/release events, style variants
+//! - `mouse_area` -- invisible overlay that captures mouse events (enter,
+//!   exit, move, scroll, right/middle click)
+//! - `sensor` -- debounced resize observer that reports container dimensions
+//! - `tooltip` -- popup hint shown on hover or keyboard focus
+//! - `themer` -- overrides the iced theme for its subtree
+//! - `window` -- top-level window node (rendered as a container)
+//! - `overlay` -- positioned popup anchored to a sibling element
 
 use std::time::Duration;
 

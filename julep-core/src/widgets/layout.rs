@@ -1,5 +1,16 @@
-//! Layout widgets: column, row, container, stack, grid, pin,
-//! keyed_column, float, responsive, scrollable, and pane_grid.
+//! Layout widgets -- containers that arrange child elements.
+//!
+//! - `column` -- vertical stack with spacing, padding, alignment
+//! - `row` -- horizontal stack with spacing, padding, alignment
+//! - `container` -- single-child wrapper with styling, alignment, clipping
+//! - `stack` -- overlapping children (z-order by tree position)
+//! - `grid` -- fixed-column grid with optional fluid layout
+//! - `pin` -- absolute-positioned child at (x, y)
+//! - `keyed_column` -- column with stable identity keys for efficient diffing
+//! - `float` -- child offset by translation and scale
+//! - `responsive` -- re-renders children when available size changes
+//! - `scrollable` -- scrolling container (vertical, horizontal, or both)
+//! - `pane_grid` -- resizable split panes with drag handles
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};

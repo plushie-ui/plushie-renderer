@@ -1,5 +1,14 @@
-//! Display widgets: text, rich_text, image, svg, markdown, progress_bar,
-//! rule, space, and qr_code.
+//! Display widgets -- read-only visual content.
+//!
+//! - `text` -- single-style text with size, color, font, alignment, wrapping
+//! - `rich_text` -- multi-span text with per-span styling, links, highlights
+//! - `image` -- raster images from file paths or in-memory registry handles
+//! - `svg` -- vector images with optional tint color
+//! - `markdown` -- rendered markdown with syntax-highlighted code blocks
+//! - `progress_bar` -- horizontal or vertical fill indicator
+//! - `rule` -- horizontal or vertical divider line
+//! - `space` -- invisible spacer for layout padding
+//! - `qr_code` -- QR code rendered via canvas with configurable colors
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

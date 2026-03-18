@@ -1,4 +1,10 @@
-//! Table widget: scrollable data grid with sortable columns.
+//! Table widget -- scrollable data grid with sortable columns.
+//!
+//! Renders a header row (optional) and data rows from `columns` and
+//! `rows` JSON props. Columns define key, label, alignment, width,
+//! and sortability. Clicking a sortable column header emits a `sort`
+//! event with the column key. Separator styling and text sizes are
+//! configurable.
 
 use iced::widget::{button, column, container, row, rule, scrollable, text};
 use iced::{Element, Fill, Length, alignment};

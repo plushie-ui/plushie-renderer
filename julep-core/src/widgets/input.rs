@@ -1,5 +1,14 @@
-//! Input widgets: text_input, text_editor, checkbox, toggler, radio,
-//! slider, vertical_slider, pick_list, and combo_box.
+//! Input widgets -- user-interactive controls that produce events.
+//!
+//! - `text_input` -- single-line text field with placeholder, icons, paste
+//! - `text_editor` -- multi-line editor with undo/redo, syntax highlighting
+//! - `checkbox` -- toggle with label, multiple style variants
+//! - `toggler` -- on/off switch with label
+//! - `radio` -- exclusive selection within a named group
+//! - `slider` -- horizontal range input with rail and handle styling
+//! - `vertical_slider` -- vertical variant of slider
+//! - `pick_list` -- dropdown selection from a list of options
+//! - `combo_box` -- filterable dropdown with text input
 
 use iced::widget::text::LineHeight;
 use iced::widget::{
