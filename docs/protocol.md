@@ -418,7 +418,7 @@ Manage windows directly (outside of tree-driven sync).
 | `set_resize_increments` | Set resize step size (width, height) |
 | `allow_automatic_tabbing` | macOS automatic tab grouping (enabled: bool) |
 
-**Query operations** (response sent as effect_response):
+**Query operations** (response sent as `effect_response`):
 
 | Op | Response fields |
 |----|-----------------|
@@ -432,11 +432,20 @@ Manage windows directly (outside of tree-driven sync).
 | `raw_id` | raw_id, platform |
 | `monitor_size` | width, height (logical pixels) |
 | `set_icon` | icon_data (base64 RGBA), width, height |
-| `get_system_theme` | system theme (light/dark) |
-| `get_system_info` | CPU, memory, GPU info |
 
-Query operations accept an optional `request_id` field in settings,
-echoed back in the response for correlation.
+These accept an optional `request_id` field in settings, echoed
+back in the response for correlation.
+
+**System query operations** (response sent as `widget_query_response`):
+
+| Op | Response kind | Response data |
+|----|---------------|---------------|
+| `get_system_theme` | `system_theme` | `"light"` or `"dark"` |
+| `get_system_info` | `system_info` | CPU, memory, GPU info object |
+
+System queries use a `tag` field in the payload (like widget op
+queries) and produce `widget_query_response` rather than
+`effect_response`.
 
 ### EffectRequest
 
@@ -582,7 +591,38 @@ Inspect the tree or find widgets by selector.
 | `label` | Find by a11y label |
 | `focused` | Find the focused widget (no value field needed) |
 
+**Selector search semantics:**
+
+Selectors search the tree depth-first (max depth 256). The first
+matching node is returned.
+
+| by | Matches against |
+|----|----------------|
+| `id` | Exact match on node `id` field |
+| `text` | Node `props.content`, `props.label`, `props.value`, or `props.placeholder` |
+| `role` | Node `props.a11y.role`, or falls back to `type` field (e.g. type `"button"` matches role `"button"`) |
+| `label` | Node `props.a11y.label`, or falls back to `props.label` or `props.content` |
+| `focused` | Node with `props.focused == true` or `props.a11y.focused == true` |
+
+**When not found:** Query returns `data: null`. Interact returns
+empty events list.
+
 Response: `query_response` with `id`, `target`, `data`.
+
+**Example: full tree query**
+
+```json
+{
+  "type": "query",
+  "session": "s1",
+  "id": "q2",
+  "target": "tree",
+  "selector": {}
+}
+```
+
+Returns the entire tree as `data`, or `null` if no tree has been
+sent via Snapshot.
 
 ### Interact
 
@@ -599,6 +639,13 @@ daemon and headless modes for programmatic inspection and interaction.
   "payload": {}
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Request ID for response correlation |
+| `action` | string | Interaction type (see action table below) |
+| `selector` | object | Target widget selector (see Query for format). Required for widget-specific actions, optional for global actions like `press`/`release`/`move_to`/`scroll`. |
+| `payload` | object | Action-specific parameters (see payload table below) |
 
 **Actions and their iced event mappings:**
 
@@ -626,6 +673,58 @@ Actions marked **synthetic only** have no iced event equivalent
 (e.g. slider requires a precise mouse drag, paste has no iced
 input event). The renderer produces synthetic OutgoingEvents
 directly without widget processing.
+
+**Action payloads:**
+
+| Action | Payload fields | Description |
+|--------|---------------|-------------|
+| `click` | (none) | |
+| `toggle` | `value` (bool) | Toggle value. Defaults to `false` if omitted. SDKs should compute the inverse of the current widget state (e.g. read `is_checked` from tree props, invert it). In headless mode, the real widget value is captured from iced regardless of this field. |
+| `select` | `value` (string) | Value to select from a pick_list, combo_box, or radio group. |
+| `type_text` | `text` (string, required) | Text to type into the widget |
+| `type_key` | `key` (string, required) | Key to press and release (see Key format below) |
+| `press` | `key` (string, required) | Key to press (key down only) |
+| `release` | `key` (string, required) | Key to release (key up only) |
+| `submit` | `value` (string) | Submit value. Defaults to `""` if omitted. The renderer does not read from the tree -- SDKs should read the widget's current `props.value` and provide it. |
+| `scroll` | `delta_x` (number), `delta_y` (number) | Scroll deltas in lines |
+| `move_to` | `x` (number), `y` (number) | Cursor position in logical pixels |
+| `slide` | `value` (number, required) | Slider value |
+| `paste` | `text` (string, required) | Text to paste |
+| `sort` | `column` (string, required) | Column key to sort by |
+| `canvas_press` | `x` (number), `y` (number) | Canvas coordinates |
+| `canvas_release` | `x` (number), `y` (number) | Canvas coordinates |
+| `canvas_move` | `x` (number), `y` (number) | Canvas coordinates |
+| `pane_focus_cycle` | (none) | |
+
+**Key format:**
+
+Keys for `press`, `release`, and `type_key` actions can be specified
+in two formats:
+
+Combined format (modifiers joined with `+`):
+```json
+{"key": "ctrl+shift+s"}
+```
+
+Explicit modifiers:
+```json
+{"key": "a", "modifiers": {"ctrl": true, "shift": false, "alt": false, "logo": false}}
+```
+
+Modifier aliases: `command` maps to `ctrl`, `super` and `meta` map
+to `logo`.
+
+Named keys (case-insensitive, aliases separated by `/`):
+
+`Enter`/`Return`, `Tab`, `Space`, `Escape`/`Esc`,
+`Backspace`, `Delete`/`Del`, `ArrowUp`/`Up`,
+`ArrowDown`/`Down`, `ArrowLeft`/`Left`, `ArrowRight`/`Right`,
+`Home`, `End`, `PageUp`/`Page_Up`, `PageDown`/`Page_Down`,
+`F1` through `F12`.
+
+Single characters (e.g. `"a"`, `"1"`, `"/"`) are sent as character
+key events. Multi-character strings that don't match a named key
+are sent as-is (the renderer does not reject them).
 
 In **daemon mode**, all actions produce synthetic events regardless
 -- the interact protocol is a scripting convenience, not a
@@ -741,11 +840,33 @@ mode.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `timestamp` | number | Frame timestamp in microseconds |
+| `timestamp` | number | Frame timestamp, passed through to the `animation_frame` event as-is. By convention, milliseconds (matching the daemon's `Instant::as_millis()` output). |
 
 ---
 
 ## Outgoing messages (renderer -> host)
+
+### Request-response reference
+
+Every request message produces exactly one response. The `id` and
+`session` fields are echoed back for correlation.
+
+| Request | Response type | Notes |
+|---------|--------------|-------|
+| Query | `query_response` | |
+| Interact | `interact_response` | May be preceded by `interact_step` messages in headless mode |
+| TreeHash | `tree_hash_response` | |
+| ScreenshotCapture | `screenshot_response` | |
+| Reset | `reset_response` | |
+| EffectRequest | `effect_response` | |
+| WidgetOp (query ops) | `widget_query_response` | tree_hash, find_focused, list_images |
+| WindowOp (query ops) | `effect_response` | get_size, get_position, get_mode, etc. |
+| WindowOp (system queries) | `widget_query_response` | get_system_theme, get_system_info |
+
+Messages without responses: Settings, Snapshot, Patch,
+SubscriptionRegister, SubscriptionUnregister, WidgetOp
+(non-query), WindowOp (non-query), ImageOp, ExtensionCommand,
+ExtensionCommandBatch, AdvanceFrame.
 
 ### event
 
@@ -973,6 +1094,16 @@ Response to widget op queries (`tree_hash`, `find_focused`,
 | `tag` | string | Tag from the widget op request |
 | `data` | object | Query-specific result |
 
+**Data shapes by query kind:**
+
+| kind | data | Description |
+|------|------|-------------|
+| `tree_hash` | `{"hash": "sha256hex"}` | SHA-256 hash of the tree |
+| `find_focused` | `{"focused": "widget_id"}` | ID of focused widget, or null |
+| `list_images` | `{"handles": ["name1", ...]}` | All registered image handle names |
+| `system_theme` | `"light"` or `"dark"` | Current OS theme preference |
+| `system_info` | `{"cpu_brand": "...", "cpu_cores": N, "memory_total": N, "memory_used": N, "graphics_backend": "...", "graphics_adapter": "...", ...}` | System hardware info |
+
 ### interact_step
 
 Emitted during headless iterative interact when an injected iced
@@ -1038,6 +1169,13 @@ Response to a TreeHash message.
 }
 ```
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `session` | string | Session |
+| `id` | string | Matches request id |
+| `name` | string | Echoes the capture name |
+| `hash` | string | SHA-256 hex hash of the tree serialized as JSON |
+
 ### screenshot_response
 
 Response to a ScreenshotCapture message.
@@ -1055,6 +1193,19 @@ Response to a ScreenshotCapture message.
 }
 ```
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `session` | string | Session |
+| `id` | string | Matches request id |
+| `name` | string | Echoes the capture name |
+| `hash` | string | SHA-256 hex hash of RGBA data (empty string in mock mode) |
+| `width` | number | Rendered width in pixels (0 in mock mode) |
+| `height` | number | Rendered height in pixels (0 in mock mode) |
+| `rgba` | binary | RGBA pixel data (base64 in JSON, native binary in msgpack). Absent in mock mode. |
+
+Maximum screenshot dimension: 16384 pixels (width and height are
+clamped to this limit).
+
 ### reset_response
 
 Response to a Reset message.
@@ -1067,6 +1218,49 @@ Response to a Reset message.
   "status": "ok"
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session` | string | Session |
+| `id` | string | Matches request id |
+| `status` | string | Always `"ok"` |
+
+---
+
+## Execution modes
+
+The renderer runs in one of three modes, selected by CLI flags.
+Behaviour differences that affect SDK implementations:
+
+### Default (daemon) mode
+
+Full iced rendering with real windows. Production mode.
+
+- All messages work as documented.
+- Interact always produces synthetic events (not captured from iced).
+- Subscriptions emit real events from the window system.
+- Effects (file dialogs, clipboard) execute natively.
+
+### Headless mode (`--headless`)
+
+Real rendering via tiny-skia. No display server required.
+
+- Interact injects real iced events and captures widget output.
+  May emit `interact_step` messages requiring snapshot round-trips.
+- ScreenshotCapture returns real RGBA pixel data.
+- Effects always return `"cancelled"` status (no platform dialogs).
+- Subscriptions work (events emitted on registration match).
+- Window operations are no-ops (no real windows).
+
+### Mock mode (`--mock`)
+
+No rendering. Protocol-only. Fastest mode for testing.
+
+- Interact always produces synthetic events. No `interact_step`.
+- ScreenshotCapture returns an empty stub (hash `""`, no rgba).
+- Effects always return `"cancelled"` status.
+- Subscriptions register/unregister but no events are emitted.
+- Window operations and widget operations (focus, scroll) are no-ops.
 
 ---
 
@@ -1089,6 +1283,35 @@ deserializer.
 All floating-point values in outgoing events are sanitized before
 serialization. NaN and infinity are replaced with `0.0`. This prevents
 JSON serialization errors and ensures all values are valid numbers.
+
+---
+
+## Limits
+
+| Limit | Value | Description |
+|-------|-------|-------------|
+| Message size | 64 MiB | Maximum wire message payload |
+| Tree depth | 256 | Maximum recursion for tree search and rendering |
+| Screenshot dimension | 16384 px | Maximum width or height for screenshots |
+| MsgPack recursion | 128 | Maximum nesting depth for msgpack decoding |
+
+---
+
+## Error handling
+
+The renderer is resilient to malformed input. Errors are logged to
+stderr but do not crash the process.
+
+- **Decode errors** (malformed JSON, invalid msgpack): Message is
+  skipped. No response is sent. The renderer continues reading.
+- **Unknown message type**: Deserialization fails. Message skipped.
+- **Missing required fields**: Deserialization fails. Message skipped.
+- **Unknown widget op or window op**: Logged as warning. No response.
+- **Unknown interact action**: Empty events in response.
+- **Selector finds nothing**: Query returns `data: null`. Interact
+  returns empty events.
+- **Broken stdout pipe**: Renderer exits cleanly.
+- **Protocol version mismatch**: Renderer exits on startup.
 
 ---
 
