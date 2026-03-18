@@ -491,9 +491,27 @@ impl App {
                             selector,
                             payload,
                         } => {
+                            // Emit synthetic julep events (host-managed state).
                             crate::test_protocol::handle_interact(
-                                &self.core, id, action, selector, payload,
+                                &self.core,
+                                id,
+                                action.clone(),
+                                selector.clone(),
+                                payload.clone(),
                             );
+
+                            // Inject real iced events (renderer-managed state).
+                            let iced_events = crate::headless::interaction_to_iced_events(
+                                &action,
+                                None,
+                                &payload,
+                                iced::mouse::Cursor::Unavailable,
+                            );
+                            if let Some((_, &iced_id)) = self.window_map.iter().next()
+                                && !iced_events.is_empty()
+                            {
+                                return window::inject_events(iced_id, iced_events).discard();
+                            }
                             return Task::none();
                         }
                         IncomingMessage::Reset { id } => {

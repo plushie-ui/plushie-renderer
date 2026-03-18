@@ -182,7 +182,7 @@ impl Session {
 /// Convert a key name string (as sent by the test protocol) to an iced
 /// `keyboard::Key`. Named keys use their Debug format (e.g. "Enter",
 /// "Tab", "ArrowUp"); single characters become `Key::Character`.
-fn parse_iced_key(name: &str) -> Key {
+pub(crate) fn parse_iced_key(name: &str) -> Key {
     match name {
         "Enter" | "enter" | "Return" | "return" => Key::Named(keyboard::key::Named::Enter),
         "Tab" | "tab" => Key::Named(keyboard::key::Named::Tab),
@@ -224,7 +224,7 @@ fn parse_iced_key(name: &str) -> Key {
 }
 
 /// Build iced `Modifiers` from parsed test protocol modifiers JSON.
-fn parse_iced_modifiers(mods: &Value) -> Modifiers {
+pub(crate) fn parse_iced_modifiers(mods: &Value) -> Modifiers {
     let mut m = Modifiers::empty();
     if mods.get("shift").and_then(|v| v.as_bool()).unwrap_or(false) {
         m |= Modifiers::SHIFT;
@@ -242,7 +242,7 @@ fn parse_iced_modifiers(mods: &Value) -> Modifiers {
 }
 
 /// Build a KeyPressed iced event.
-fn make_key_pressed(key: Key, modifiers: Modifiers, text: Option<SmolStr>) -> Event {
+pub(crate) fn make_key_pressed(key: Key, modifiers: Modifiers, text: Option<SmolStr>) -> Event {
     Event::Keyboard(keyboard::Event::KeyPressed {
         key: key.clone(),
         modified_key: key,
@@ -257,7 +257,7 @@ fn make_key_pressed(key: Key, modifiers: Modifiers, text: Option<SmolStr>) -> Ev
 }
 
 /// Build a KeyReleased iced event.
-fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
+pub(crate) fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
     Event::Keyboard(keyboard::Event::KeyReleased {
         key: key.clone(),
         modified_key: key,
@@ -277,7 +277,7 @@ fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
 ///
 /// Returns an empty vec for action types that don't map to iced events
 /// (synthetic-only actions like paste, sort, canvas_*, pane_focus_cycle).
-fn interaction_to_iced_events(
+pub(crate) fn interaction_to_iced_events(
     action: &str,
     _widget_id: Option<&str>,
     payload: &Value,
