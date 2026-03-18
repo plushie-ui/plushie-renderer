@@ -9,17 +9,31 @@ use julep_core::message::{
 use julep_core::protocol::OutgoingEvent;
 
 use super::App;
+use super::constants::*;
 use super::emitters::{self, emit_event};
+
+fn path_to_string(path: std::path::PathBuf) -> String {
+    match path.to_str() {
+        Some(s) => s.to_string(),
+        None => {
+            log::warn!(
+                "file path contains non-UTF-8 bytes, using lossy conversion: {}",
+                path.display()
+            );
+            path.to_string_lossy().into_owned()
+        }
+    }
+}
 
 impl App {
     pub(super) fn handle_key_pressed(&self, data: KeyEventData) -> Task<Message> {
-        self.emit_subscription("on_key_press", data.captured, |tag| {
+        self.emit_subscription(SUB_KEY_PRESS, data.captured, |tag| {
             OutgoingEvent::key_press(tag, &data)
         })
     }
 
     pub(super) fn handle_key_released(&self, data: KeyEventData) -> Task<Message> {
-        self.emit_subscription("on_key_release", data.captured, |tag| {
+        self.emit_subscription(SUB_KEY_RELEASE, data.captured, |tag| {
             OutgoingEvent::key_release(tag, &data)
         })
     }
@@ -29,25 +43,25 @@ impl App {
         mods: iced::keyboard::Modifiers,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_modifiers_changed", captured, |tag| {
+        self.emit_subscription(SUB_MODIFIERS_CHANGED, captured, |tag| {
             OutgoingEvent::modifiers_changed(tag, serialize_modifiers(mods))
         })
     }
 
     pub(super) fn handle_cursor_moved(&self, pos: Point, captured: bool) -> Task<Message> {
-        self.emit_subscription("on_mouse_move", captured, |tag| {
+        self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_moved(tag, pos.x, pos.y)
         })
     }
 
     pub(super) fn handle_cursor_entered(&self, captured: bool) -> Task<Message> {
-        self.emit_subscription("on_mouse_move", captured, |tag| {
+        self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_entered(tag)
         })
     }
 
     pub(super) fn handle_cursor_left(&self, captured: bool) -> Task<Message> {
-        self.emit_subscription("on_mouse_move", captured, |tag| {
+        self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_left(tag)
         })
     }
@@ -57,7 +71,7 @@ impl App {
         button: iced::mouse::Button,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_mouse_button", captured, |tag| {
+        self.emit_subscription(SUB_MOUSE_BUTTON, captured, |tag| {
             OutgoingEvent::button_pressed(tag, serialize_mouse_button(&button))
         })
     }
@@ -67,7 +81,7 @@ impl App {
         button: iced::mouse::Button,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_mouse_button", captured, |tag| {
+        self.emit_subscription(SUB_MOUSE_BUTTON, captured, |tag| {
             OutgoingEvent::button_released(tag, serialize_mouse_button(&button))
         })
     }
@@ -77,7 +91,7 @@ impl App {
         delta: iced::mouse::ScrollDelta,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_mouse_scroll", captured, |tag| {
+        self.emit_subscription(SUB_MOUSE_SCROLL, captured, |tag| {
             let (dx, dy, unit) = serialize_scroll_delta(&delta);
             OutgoingEvent::wheel_scrolled(tag, dx, dy, unit)
         })
@@ -89,7 +103,7 @@ impl App {
         pos: Point,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_touch", captured, |tag| {
+        self.emit_subscription(SUB_TOUCH, captured, |tag| {
             OutgoingEvent::finger_pressed(tag, finger.0, pos.x, pos.y)
         })
     }
@@ -100,7 +114,7 @@ impl App {
         pos: Point,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_touch", captured, |tag| {
+        self.emit_subscription(SUB_TOUCH, captured, |tag| {
             OutgoingEvent::finger_moved(tag, finger.0, pos.x, pos.y)
         })
     }
@@ -111,7 +125,7 @@ impl App {
         pos: Point,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_touch", captured, |tag| {
+        self.emit_subscription(SUB_TOUCH, captured, |tag| {
             OutgoingEvent::finger_lifted(tag, finger.0, pos.x, pos.y)
         })
     }
@@ -122,13 +136,13 @@ impl App {
         pos: Point,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_touch", captured, |tag| {
+        self.emit_subscription(SUB_TOUCH, captured, |tag| {
             OutgoingEvent::finger_lost(tag, finger.0, pos.x, pos.y)
         })
     }
 
     pub(super) fn handle_ime_opened(&self, captured: bool) -> Task<Message> {
-        self.emit_subscription("on_ime", captured, OutgoingEvent::ime_opened)
+        self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_opened)
     }
 
     pub(super) fn handle_ime_preedit(
@@ -137,19 +151,38 @@ impl App {
         cursor: Option<std::ops::Range<usize>>,
         captured: bool,
     ) -> Task<Message> {
-        self.emit_subscription("on_ime", captured, |tag| {
+        self.emit_subscription(SUB_IME, captured, |tag| {
             OutgoingEvent::ime_preedit(tag, text, cursor)
         })
     }
 
     pub(super) fn handle_ime_commit(&self, text: String, captured: bool) -> Task<Message> {
-        self.emit_subscription("on_ime", captured, |tag| {
+        self.emit_subscription(SUB_IME, captured, |tag| {
             OutgoingEvent::ime_commit(tag, text)
         })
     }
 
     pub(super) fn handle_ime_closed(&self, captured: bool) -> Task<Message> {
-        self.emit_subscription("on_ime", captured, OutgoingEvent::ime_closed)
+        self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_closed)
+    }
+
+    /// Emit a window event to both the catch-all window subscription and
+    /// the event-specific subscription (if registered).
+    fn emit_window_event(
+        &self,
+        specific_key: Option<&str>,
+        event_fn: impl Fn(String, String) -> OutgoingEvent,
+        julep_id: String,
+    ) -> io::Result<()> {
+        if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
+            emit_event(event_fn(tag.clone(), julep_id.clone()))?;
+        }
+        if let Some(key) = specific_key
+            && let Some(tag) = self.core.active_subscriptions.get(key)
+        {
+            emit_event(event_fn(tag.clone(), julep_id))?;
+        }
+        Ok(())
     }
 
     pub(super) fn handle_window_event(
@@ -157,7 +190,7 @@ impl App {
         iced_id: window::Id,
         evt: window::Event,
     ) -> Task<Message> {
-        let julep_id = self.julep_id_for(&iced_id);
+        let julep_id = self.windows.julep_id_for(&iced_id);
         if julep_id.is_empty() {
             log::warn!(
                 "received window event for unknown iced window {:?}, skipping emission",
@@ -173,7 +206,7 @@ impl App {
                     size,
                     scale_factor,
                 } => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
                         let pos = position.map(|p| (p.x, p.y));
                         emit_event(OutgoingEvent::window_opened(
                             tag.clone(),
@@ -184,7 +217,7 @@ impl App {
                             scale_factor,
                         ))?;
                     }
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_open") {
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_OPEN) {
                         let pos = position.map(|p| (p.x, p.y));
                         emit_event(OutgoingEvent::window_opened(
                             tag.clone(),
@@ -197,48 +230,26 @@ impl App {
                     }
                 }
                 window::Event::Closed => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
                         emit_event(OutgoingEvent::window_closed(tag.clone(), julep_id))?;
                     }
                 }
                 window::Event::Moved(point) => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                        emit_event(OutgoingEvent::window_moved(
-                            tag.clone(),
-                            julep_id.clone(),
-                            point.x,
-                            point.y,
-                        ))?;
-                    }
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_move") {
-                        emit_event(OutgoingEvent::window_moved(
-                            tag.clone(),
-                            julep_id,
-                            point.x,
-                            point.y,
-                        ))?;
-                    }
+                    self.emit_window_event(
+                        Some(SUB_WINDOW_MOVE),
+                        |tag, jid| OutgoingEvent::window_moved(tag, jid, point.x, point.y),
+                        julep_id,
+                    )?;
                 }
                 window::Event::Resized(size) => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                        emit_event(OutgoingEvent::window_resized(
-                            tag.clone(),
-                            julep_id.clone(),
-                            size.width,
-                            size.height,
-                        ))?;
-                    }
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_resize") {
-                        emit_event(OutgoingEvent::window_resized(
-                            tag.clone(),
-                            julep_id,
-                            size.width,
-                            size.height,
-                        ))?;
-                    }
+                    self.emit_window_event(
+                        Some(SUB_WINDOW_RESIZE),
+                        |tag, jid| OutgoingEvent::window_resized(tag, jid, size.width, size.height),
+                        julep_id,
+                    )?;
                 }
                 window::Event::Rescaled(factor) => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT) {
                         emit_event(OutgoingEvent::window_rescaled(
                             tag.clone(),
                             julep_id,
@@ -247,56 +258,33 @@ impl App {
                     }
                 }
                 window::Event::Focused => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                        emit_event(OutgoingEvent::window_focused(tag.clone(), julep_id.clone()))?;
-                    }
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_focus") {
-                        emit_event(OutgoingEvent::window_focused(tag.clone(), julep_id))?;
-                    }
+                    self.emit_window_event(
+                        Some(SUB_WINDOW_FOCUS),
+                        OutgoingEvent::window_focused,
+                        julep_id,
+                    )?;
                 }
                 window::Event::Unfocused => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event") {
-                        emit_event(OutgoingEvent::window_unfocused(
-                            tag.clone(),
-                            julep_id.clone(),
-                        ))?;
-                    }
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_unfocus") {
-                        emit_event(OutgoingEvent::window_unfocused(tag.clone(), julep_id))?;
-                    }
+                    self.emit_window_event(
+                        Some(SUB_WINDOW_UNFOCUS),
+                        OutgoingEvent::window_unfocused,
+                        julep_id,
+                    )?;
                 }
                 window::Event::FileHovered(path) => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
-                        let path_str = match path.to_str() {
-                            Some(s) => s.to_string(),
-                            None => {
-                                log::warn!(
-                                    "file path contains non-UTF-8 bytes, using lossy conversion: {}",
-                                    path.display()
-                                );
-                                path.to_string_lossy().into_owned()
-                            }
-                        };
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
+                        let path_str = path_to_string(path);
                         emit_event(OutgoingEvent::file_hovered(tag.clone(), julep_id, path_str))?;
                     }
                 }
                 window::Event::FileDropped(path) => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
-                        let path_str = match path.to_str() {
-                            Some(s) => s.to_string(),
-                            None => {
-                                log::warn!(
-                                    "file path contains non-UTF-8 bytes, using lossy conversion: {}",
-                                    path.display()
-                                );
-                                path.to_string_lossy().into_owned()
-                            }
-                        };
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
+                        let path_str = path_to_string(path);
                         emit_event(OutgoingEvent::file_dropped(tag.clone(), julep_id, path_str))?;
                     }
                 }
                 window::Event::FilesHoveredLeft => {
-                    if let Some(tag) = self.core.active_subscriptions.get("on_file_drop") {
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_FILE_DROP) {
                         emit_event(OutgoingEvent::files_hovered_left(tag.clone(), julep_id))?;
                     }
                 }

@@ -113,8 +113,7 @@ impl App {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
                 if !win_id.is_empty() {
-                    if let Some(iced_id) = self.window_map.remove(win_id) {
-                        self.reverse_window_map.remove(&iced_id);
+                    if let Some(iced_id) = self.windows.remove_by_julep(win_id) {
                         window::close(iced_id)
                     } else {
                         log::warn!("close_window: unknown window_id: {win_id}");

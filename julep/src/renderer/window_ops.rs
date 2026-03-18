@@ -21,7 +21,7 @@ impl App {
     ) -> Task<Message> {
         match op {
             "open" => {
-                if self.window_map.contains_key(window_id) {
+                if self.windows.contains_julep(window_id) {
                     log::warn!("window_op open: {window_id} already open, skipping");
                     return Task::none();
                 }
@@ -30,19 +30,14 @@ impl App {
                 let initial_decorations = win_settings.decorations;
                 let (iced_id, open_task) = window::open(win_settings);
 
-                self.window_map.insert(window_id.to_string(), iced_id);
-                self.reverse_window_map
-                    .insert(iced_id, window_id.to_string());
-                self.decoration_state
-                    .insert(window_id.to_string(), initial_decorations);
+                self.windows.insert(window_id.to_string(), iced_id);
+                self.windows.set_decorated(window_id, initial_decorations);
 
                 let julep_id = window_id.to_string();
                 open_task.map(move |id| Message::WindowOpened(id, julep_id.clone()))
             }
             "close" => {
-                if let Some(iced_id) = self.window_map.remove(window_id) {
-                    self.reverse_window_map.remove(&iced_id);
-                    self.decoration_state.remove(window_id);
+                if let Some(iced_id) = self.windows.remove_by_julep(window_id) {
                     window::close(iced_id)
                 } else {
                     log::warn!("window_op close: unknown window_id: {window_id}");
@@ -53,7 +48,7 @@ impl App {
                 // Apply changed window props to an already-open window.
                 // The host sends this when a surviving window's props change
                 // between renders.
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let mut tasks: Vec<Task<Message>> = Vec::new();
 
                     if let Some(obj) = settings.as_object() {
@@ -112,13 +107,9 @@ impl App {
                             tasks.push(window::set_level(iced_id, level));
                         }
                         if let Some(desired) = obj.get("decorations").and_then(|v| v.as_bool()) {
-                            let current = self
-                                .decoration_state
-                                .get(window_id)
-                                .copied()
-                                .unwrap_or(true);
+                            let current = self.windows.is_decorated(window_id);
                             if desired != current {
-                                self.decoration_state.insert(window_id.to_string(), desired);
+                                self.windows.set_decorated(window_id, desired);
                                 tasks.push(window::toggle_decorations(iced_id));
                             }
                         }
@@ -131,7 +122,7 @@ impl App {
                 }
             }
             "resize" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let w = settings
                         .get("width")
                         .and_then(|v| v.as_f64())
@@ -146,7 +137,7 @@ impl App {
                 }
             }
             "move" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let x = settings.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                     let y = settings.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                     window::move_to(iced_id, Point::new(x, y))
@@ -155,7 +146,7 @@ impl App {
                 }
             }
             "maximize" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let maximized = settings
                         .get("maximized")
                         .and_then(|v| v.as_bool())
@@ -166,7 +157,7 @@ impl App {
                 }
             }
             "minimize" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let minimized = settings
                         .get("minimized")
                         .and_then(|v| v.as_bool())
@@ -177,7 +168,7 @@ impl App {
                 }
             }
             "set_mode" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let mode = parse_window_mode(settings);
                     window::set_mode(iced_id, mode)
                 } else {
@@ -185,35 +176,30 @@ impl App {
                 }
             }
             "toggle_maximize" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     window::toggle_maximize(iced_id)
                 } else {
                     Task::none()
                 }
             }
             "toggle_decorations" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
-                    let current = self
-                        .decoration_state
-                        .get(window_id)
-                        .copied()
-                        .unwrap_or(true);
-                    self.decoration_state
-                        .insert(window_id.to_string(), !current);
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
+                    let current = self.windows.is_decorated(window_id);
+                    self.windows.set_decorated(window_id, !current);
                     window::toggle_decorations(iced_id)
                 } else {
                     Task::none()
                 }
             }
             "gain_focus" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     window::gain_focus(iced_id)
                 } else {
                     Task::none()
                 }
             }
             "set_level" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let level = parse_window_level(
                         settings
                             .get("level")
@@ -226,7 +212,7 @@ impl App {
                 }
             }
             "drag" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     window::drag(iced_id)
                 } else {
                     Task::none()
@@ -235,7 +221,7 @@ impl App {
             "drag_resize" => {
                 #[cfg(target_os = "macos")]
                 log::warn!("drag_resize is not supported on macOS");
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let direction = parse_direction(
                         settings
                             .get("direction")
@@ -248,7 +234,7 @@ impl App {
                 }
             }
             "request_attention" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let urgency =
                         settings
                             .get("urgency")
@@ -265,14 +251,14 @@ impl App {
             "show_system_menu" => {
                 #[cfg(not(target_os = "windows"))]
                 log::warn!("show_system_menu is only supported on Windows");
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     window::show_system_menu(iced_id)
                 } else {
                     Task::none()
                 }
             }
             "set_resizable" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let resizable = settings
                         .get("resizable")
                         .and_then(|v| v.as_bool())
@@ -283,7 +269,7 @@ impl App {
                 }
             }
             "set_min_size" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let size = parse_optional_size(settings);
                     window::set_min_size(iced_id, size)
                 } else {
@@ -291,7 +277,7 @@ impl App {
                 }
             }
             "set_max_size" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let size = parse_optional_size(settings);
                     window::set_max_size(iced_id, size)
                 } else {
@@ -299,7 +285,7 @@ impl App {
                 }
             }
             "mouse_passthrough" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let enabled = settings
                         .get("enabled")
                         .and_then(|v| v.as_bool())
@@ -315,7 +301,7 @@ impl App {
             }
             // -- Query operations: return results as effect_response --
             "get_size" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::size(iced_id).map(move |size| {
@@ -338,7 +324,7 @@ impl App {
                 }
             }
             "get_position" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::position(iced_id).map(move |pos| {
@@ -362,7 +348,7 @@ impl App {
                 }
             }
             "get_mode" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::mode(iced_id).map(move |mode| {
@@ -389,7 +375,7 @@ impl App {
                 }
             }
             "get_scale_factor" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::scale_factor(iced_id).map(move |factor| {
@@ -411,7 +397,7 @@ impl App {
                 }
             }
             "is_maximized" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::is_maximized(iced_id).map(move |val| {
@@ -433,7 +419,7 @@ impl App {
                 }
             }
             "is_minimized" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::is_minimized(iced_id).map(move |val| {
@@ -455,7 +441,7 @@ impl App {
                 }
             }
             "screenshot" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::screenshot(iced_id).map(move |screenshot| {
@@ -491,7 +477,7 @@ impl App {
             // - Linux: 32x32 or 48x48 (depends on WM/DE)
             // All platforms: square, power-of-two dimensions recommended.
             "set_icon" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let icon_data_b64 = settings
                         .get("icon_data")
                         .and_then(|v| v.as_str())
@@ -567,7 +553,7 @@ impl App {
                 }
             }
             "raw_id" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::raw_id::<Message>(iced_id).map(move |raw| {
@@ -592,7 +578,7 @@ impl App {
             // Returns logical dimensions (physical pixels / scale_factor).
             // On HiDPI displays, these are smaller than the actual pixel count.
             "monitor_size" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let wid = window_id.to_string();
                     let req_id = settings.get("request_id").cloned();
                     window::monitor_size(iced_id).map(move |size_opt| {
@@ -664,7 +650,7 @@ impl App {
                 })
             }
             "set_resize_increments" => {
-                if let Some(&iced_id) = self.window_map.get(window_id) {
+                if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let w = settings
                         .get("width")
                         .and_then(|v| v.as_f64())
@@ -700,7 +686,7 @@ impl App {
     /// windows and open/close as needed.
     pub(super) fn sync_windows(&mut self) -> Task<Message> {
         let tree_windows: HashSet<String> = self.core.tree.window_ids().into_iter().collect();
-        let open_windows: HashSet<String> = self.window_map.keys().cloned().collect();
+        let open_windows: HashSet<String> = self.windows.julep_ids().cloned().collect();
 
         let mut tasks = Vec::new();
 
@@ -710,10 +696,8 @@ impl App {
                 let settings = self.window_settings_for(win_id);
                 let initial_decorations = settings.decorations;
                 let (iced_id, open_task) = window::open(settings);
-                self.window_map.insert(win_id.clone(), iced_id);
-                self.reverse_window_map.insert(iced_id, win_id.clone());
-                self.decoration_state
-                    .insert(win_id.clone(), initial_decorations);
+                self.windows.insert(win_id.clone(), iced_id);
+                self.windows.set_decorated(win_id, initial_decorations);
 
                 let julep_id = win_id.clone();
                 tasks.push(open_task.map(move |id| Message::WindowOpened(id, julep_id.clone())));
@@ -723,10 +707,8 @@ impl App {
         // Close windows that are open but no longer in the tree.
         for win_id in &open_windows {
             if !tree_windows.contains(win_id)
-                && let Some(iced_id) = self.window_map.remove(win_id)
+                && let Some(iced_id) = self.windows.remove_by_julep(win_id)
             {
-                self.reverse_window_map.remove(&iced_id);
-                self.decoration_state.remove(win_id.as_str());
                 tasks.push(window::close(iced_id));
             }
         }

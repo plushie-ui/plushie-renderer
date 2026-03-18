@@ -7,7 +7,7 @@ use super::App;
 
 impl App {
     pub(super) fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
-        let julep_id = match self.reverse_window_map.get(&window_id) {
+        let julep_id = match self.windows.get_julep(&window_id) {
             Some(id) => id,
             None => {
                 return container(text("unknown window"))

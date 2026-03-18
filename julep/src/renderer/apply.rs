@@ -126,7 +126,7 @@ impl App {
         // After tree changes, update per-window theme cache and notify extensions.
         if is_tree_change {
             // Rebuild per-window theme cache from current tree.
-            self.window_theme_cache.clear();
+            self.windows.clear_theme_cache();
             for win_id in self.core.tree.window_ids() {
                 // When resolve_theme_only returns None it means "system" --
                 // no cache entry, falls through to the system_theme path
@@ -135,7 +135,7 @@ impl App {
                     && let Some(theme_val) = node.props.get("theme")
                     && let Some(theme) = julep_core::theming::resolve_theme_only(theme_val)
                 {
-                    self.window_theme_cache.insert(win_id, theme);
+                    self.windows.set_theme(&win_id, Some(theme));
                 }
             }
 

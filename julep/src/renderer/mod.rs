@@ -7,11 +7,13 @@
 
 mod app;
 mod apply;
+mod constants;
 mod events;
 mod run;
 mod subscriptions;
 mod update;
 mod view;
+mod window_map;
 
 pub(crate) mod emitters;
 mod stdin;

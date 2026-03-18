@@ -3,6 +3,7 @@ use iced::{Subscription, event, system, window};
 use julep_core::message::{KeyEventData, Message};
 
 use super::App;
+use super::constants::*;
 use super::stdin::stdin_subscription;
 
 impl App {
@@ -13,7 +14,7 @@ impl App {
             window::close_events().map(Message::WindowClosed),
         ];
 
-        let has_on_event = self.core.active_subscriptions.contains_key("on_event");
+        let has_on_event = self.core.active_subscriptions.contains_key(SUB_EVENT);
 
         self.keyboard_subscriptions(has_on_event, &mut subs);
         self.mouse_subscriptions(has_on_event, &mut subs);
@@ -30,7 +31,7 @@ impl App {
         // To avoid duplicate event delivery when both on_event and a specific
         // subscription (e.g. on_key_press) are active, skip event categories
         // that already have a dedicated subscription listener above.
-        if self.core.active_subscriptions.contains_key("on_event") {
+        if self.core.active_subscriptions.contains_key(SUB_EVENT) {
             subs.push(event::listen_with(|evt, status, window| {
                 let captured = status == iced::event::Status::Captured;
                 match evt {
@@ -131,7 +132,7 @@ impl App {
         // When on_event is active, its catch-all listener already covers keyboard,
         // mouse, touch, and IME events. Skip specific subscriptions to avoid
         // duplicate event delivery (M-16).
-        if !has_on_event && self.core.active_subscriptions.contains_key("on_key_press") {
+        if !has_on_event && self.core.active_subscriptions.contains_key(SUB_KEY_PRESS) {
             subs.push(event::listen_with(|evt, status, _window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key,
@@ -159,12 +160,7 @@ impl App {
             }));
         }
 
-        if !has_on_event
-            && self
-                .core
-                .active_subscriptions
-                .contains_key("on_key_release")
-        {
+        if !has_on_event && self.core.active_subscriptions.contains_key(SUB_KEY_RELEASE) {
             subs.push(event::listen_with(|evt, status, _window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
                     key,
@@ -194,7 +190,7 @@ impl App {
             && self
                 .core
                 .active_subscriptions
-                .contains_key("on_modifiers_changed")
+                .contains_key(SUB_MODIFIERS_CHANGED)
         {
             subs.push(event::listen_with(|evt, status, _window| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) = evt {
@@ -210,7 +206,7 @@ impl App {
     }
 
     fn mouse_subscriptions(&self, has_on_event: bool, subs: &mut Vec<Subscription<Message>>) {
-        if !has_on_event && self.core.active_subscriptions.contains_key("on_mouse_move") {
+        if !has_on_event && self.core.active_subscriptions.contains_key(SUB_MOUSE_MOVE) {
             subs.push(event::listen_with(|evt, status, window| {
                 let captured = status == iced::event::Status::Captured;
                 match evt {
@@ -232,7 +228,7 @@ impl App {
             && self
                 .core
                 .active_subscriptions
-                .contains_key("on_mouse_button")
+                .contains_key(SUB_MOUSE_BUTTON)
         {
             subs.push(event::listen_with(|evt, status, window| {
                 let captured = status == iced::event::Status::Captured;
@@ -252,7 +248,7 @@ impl App {
             && self
                 .core
                 .active_subscriptions
-                .contains_key("on_mouse_scroll")
+                .contains_key(SUB_MOUSE_SCROLL)
         {
             subs.push(event::listen_with(|evt, status, window| {
                 if let iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) = evt {
@@ -269,7 +265,7 @@ impl App {
     }
 
     fn touch_subscriptions(&self, has_on_event: bool, subs: &mut Vec<Subscription<Message>>) {
-        if !has_on_event && self.core.active_subscriptions.contains_key("on_touch") {
+        if !has_on_event && self.core.active_subscriptions.contains_key(SUB_TOUCH) {
             subs.push(event::listen_with(|evt, status, window| {
                 let captured = status == iced::event::Status::Captured;
                 match evt {
@@ -292,7 +288,7 @@ impl App {
     }
 
     fn ime_subscriptions(&self, has_on_event: bool, subs: &mut Vec<Subscription<Message>>) {
-        if !has_on_event && self.core.active_subscriptions.contains_key("on_ime") {
+        if !has_on_event && self.core.active_subscriptions.contains_key(SUB_IME) {
             subs.push(event::listen_with(|evt, status, _window| {
                 let captured = status == iced::event::Status::Captured;
                 match evt {
@@ -319,28 +315,22 @@ impl App {
         if self
             .core
             .active_subscriptions
-            .contains_key("on_window_event")
-            || self.core.active_subscriptions.contains_key("on_file_drop")
+            .contains_key(SUB_WINDOW_EVENT)
+            || self.core.active_subscriptions.contains_key(SUB_FILE_DROP)
+            || self.core.active_subscriptions.contains_key(SUB_WINDOW_OPEN)
             || self
                 .core
                 .active_subscriptions
-                .contains_key("on_window_open")
+                .contains_key(SUB_WINDOW_RESIZE)
             || self
                 .core
                 .active_subscriptions
-                .contains_key("on_window_resize")
+                .contains_key(SUB_WINDOW_FOCUS)
             || self
                 .core
                 .active_subscriptions
-                .contains_key("on_window_focus")
-            || self
-                .core
-                .active_subscriptions
-                .contains_key("on_window_unfocus")
-            || self
-                .core
-                .active_subscriptions
-                .contains_key("on_window_move")
+                .contains_key(SUB_WINDOW_UNFOCUS)
+            || self.core.active_subscriptions.contains_key(SUB_WINDOW_MOVE)
         {
             subs.push(window::events().map(|(id, evt)| Message::WindowEvent(id, evt)));
         }
@@ -348,7 +338,7 @@ impl App {
         if self
             .core
             .active_subscriptions
-            .contains_key("on_window_close")
+            .contains_key(SUB_WINDOW_CLOSE)
         {
             subs.push(window::close_requests().map(Message::WindowCloseRequested));
         }
@@ -357,7 +347,7 @@ impl App {
         if self
             .core
             .active_subscriptions
-            .contains_key("on_animation_frame")
+            .contains_key(SUB_ANIMATION_FRAME)
         {
             subs.push(window::frames().map(Message::AnimationFrame));
         }
@@ -369,7 +359,7 @@ impl App {
             || self
                 .core
                 .active_subscriptions
-                .contains_key("on_theme_change")
+                .contains_key(SUB_THEME_CHANGE)
         {
             subs.push(system::theme_changes().map(Message::ThemeChanged));
         }

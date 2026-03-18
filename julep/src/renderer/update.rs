@@ -5,6 +5,7 @@ use julep_core::message::{Message, StdinEvent};
 use julep_core::protocol::{IncomingMessage, OutgoingEvent};
 
 use super::App;
+use super::constants::*;
 use super::emitters::{self, emit_event, emit_screenshot_response, message_to_event};
 
 impl App {
@@ -168,8 +169,8 @@ impl App {
                 // decides whether to close by sending a close_window command
                 // or removing the window from the tree. Closing immediately
                 // would bypass app-level confirmation dialogs.
-                if let Some(tag) = self.core.active_subscriptions.get("on_window_close") {
-                    let julep_id = self.julep_id_for(&window_id);
+                if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_CLOSE) {
+                    let julep_id = self.windows.julep_id_for(&window_id);
                     emitters::emit_or_exit(OutgoingEvent::window_close_requested(
                         tag.clone(),
                         julep_id,
@@ -179,11 +180,8 @@ impl App {
                 }
             }
             Message::WindowClosed(window_id) => {
-                if let Some(julep_id) = self.reverse_window_map.remove(&window_id) {
-                    self.window_map.remove(&julep_id);
-                    self.window_theme_cache.remove(&julep_id);
-                    self.decoration_state.remove(&julep_id);
-                    if let Some(tag) = self.core.active_subscriptions.get("on_window_event")
+                if let Some(julep_id) = self.windows.remove_by_iced(&window_id) {
+                    if let Some(tag) = self.core.active_subscriptions.get(SUB_WINDOW_EVENT)
                         && let Err(e) =
                             emit_event(OutgoingEvent::window_closed(tag.clone(), julep_id.clone()))
                     {
@@ -196,7 +194,7 @@ impl App {
                 // The host can choose to exit, send a new Snapshot, or take other action.
                 // We do NOT call iced::exit() here because the daemon should stay alive
                 // to receive new tree snapshots (e.g. after a Reset or window re-creation).
-                if self.window_map.is_empty() && self.core.tree.root().is_some() {
+                if self.windows.is_empty() && self.core.tree.root().is_some() {
                     log::info!("all windows closed -- notifying host");
                     return emitters::emit_or_exit(OutgoingEvent::generic(
                         "all_windows_closed".to_string(),
@@ -208,15 +206,14 @@ impl App {
             }
             Message::WindowOpened(iced_id, julep_id) => {
                 log::info!("window opened: {julep_id} -> {iced_id:?}");
-                self.window_map.insert(julep_id.clone(), iced_id);
-                self.reverse_window_map.insert(iced_id, julep_id);
+                self.windows.insert(julep_id, iced_id);
                 Task::none()
             }
             Message::WindowEvent(iced_id, evt) => self.handle_window_event(iced_id, evt),
 
             // -- System / animation --
             Message::AnimationFrame(instant) => {
-                if let Some(tag) = self.core.active_subscriptions.get("on_animation_frame") {
+                if let Some(tag) = self.core.active_subscriptions.get(SUB_ANIMATION_FRAME) {
                     use std::sync::OnceLock;
                     static EPOCH: OnceLock<iced::time::Instant> = OnceLock::new();
                     let epoch = *EPOCH.get_or_init(|| instant);
@@ -233,7 +230,7 @@ impl App {
                     iced::theme::Mode::Dark => Theme::Dark,
                     _ => Theme::Dark,
                 };
-                if let Some(tag) = self.core.active_subscriptions.get("on_theme_change") {
+                if let Some(tag) = self.core.active_subscriptions.get(SUB_THEME_CHANGE) {
                     let mode_str = match mode {
                         iced::theme::Mode::Light => "light",
                         iced::theme::Mode::Dark => "dark",
@@ -365,12 +362,11 @@ impl App {
 
                         // Close all open windows and clear maps.
                         let close_tasks: Vec<Task<Message>> = self
-                            .window_map
-                            .values()
+                            .windows
+                            .iced_ids()
                             .map(|&iced_id| window::close(iced_id))
                             .collect();
-                        self.window_map.clear();
-                        self.reverse_window_map.clear();
+                        self.windows.clear();
 
                         // Reset remaining App-level state.
                         self.image_registry = julep_core::image_registry::ImageRegistry::new();
@@ -379,8 +375,6 @@ impl App {
                         self.scale_factor = 1.0;
                         self.last_slide_values.clear();
                         self.pending_tasks.clear();
-                        self.window_theme_cache.clear();
-                        self.decoration_state.clear();
 
                         Task::batch(close_tasks)
                     }
@@ -395,7 +389,7 @@ impl App {
                     }
                     IncomingMessage::ScreenshotCapture { id, name, .. } => {
                         // Capture real GPU-rendered pixels via iced
-                        if let Some((_, &iced_id)) = self.window_map.iter().next() {
+                        if let Some((_, &iced_id)) = self.windows.iter().next() {
                             window::screenshot(iced_id).map(move |shot| {
                                 use sha2::{Digest, Sha256};
                                 let rgba: &[u8] = &shot.rgba;
