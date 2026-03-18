@@ -3,6 +3,7 @@ use iced::{Element, Fill, Length, alignment};
 use serde_json::Value;
 
 use super::helpers::*;
+use crate::extensions::RenderCtx;
 use crate::message::Message;
 use crate::protocol::TreeNode;
 
@@ -54,7 +55,7 @@ fn parse_table_columns(props: Props<'_>) -> Vec<TableColumn> {
         .unwrap_or_default()
 }
 
-pub(crate) fn render_table<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Fill);
     let show_header = prop_bool_default(props, "header", true);

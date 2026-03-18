@@ -71,11 +71,11 @@ pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message
         // Display widgets
         "text" => display::render_text(node, ctx),
         "rich_text" | "rich" => display::render_rich_text(node, ctx),
-        "space" => display::render_space(node),
-        "rule" => display::render_rule(node),
-        "progress_bar" => display::render_progress_bar(node),
+        "space" => display::render_space(node, ctx),
+        "rule" => display::render_rule(node, ctx),
+        "progress_bar" => display::render_progress_bar(node, ctx),
         "image" => display::render_image(node, ctx),
-        "svg" => display::render_svg(node),
+        "svg" => display::render_svg(node, ctx),
         "markdown" => display::render_markdown(node, ctx),
         "qr_code" => display::render_qr_code(node, ctx),
         // Input widgets
@@ -84,8 +84,8 @@ pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message
         "checkbox" => input::render_checkbox(node, ctx),
         "toggler" => input::render_toggler(node, ctx),
         "radio" => input::render_radio(node, ctx),
-        "slider" => input::render_slider(node),
-        "vertical_slider" => input::render_vertical_slider(node),
+        "slider" => input::render_slider(node, ctx),
+        "vertical_slider" => input::render_vertical_slider(node, ctx),
         "pick_list" => input::render_pick_list(node, ctx),
         "combo_box" => input::render_combo_box(node, ctx),
         // Interactive widgets
@@ -99,7 +99,7 @@ pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message
         // Canvas
         "canvas" => canvas::render_canvas(node, ctx),
         // Table
-        "table" => table::render_table(node),
+        "table" => table::render_table(node, ctx),
         // Extension dispatch
         unknown => {
             if ctx.extensions.handles_type(unknown) {

@@ -377,3 +377,22 @@ pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 
     overlay_widget::OverlayWrapper::new(anchor, content, pos, gap, offset_x, offset_y).into()
 }
+
+// ---------------------------------------------------------------------------
+// Cache ensure function
+// ---------------------------------------------------------------------------
+
+use super::caches::WidgetCaches;
+
+pub(crate) fn ensure_themer_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+    let props = node.props.as_object();
+    if let Some(resolved) = props
+        .and_then(|p| p.get("theme"))
+        .and_then(crate::theming::resolve_theme_only)
+    {
+        caches.themer_themes.insert(node.id.clone(), resolved);
+    } else {
+        // No valid theme prop -- remove stale cache entry if present.
+        caches.themer_themes.remove(&node.id);
+    }
+}

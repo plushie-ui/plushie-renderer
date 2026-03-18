@@ -842,6 +842,46 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
     val.get(key).and_then(parse_color).unwrap_or(Color::WHITE)
 }
 
+// ---------------------------------------------------------------------------
+// Cache ensure function
+// ---------------------------------------------------------------------------
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
+
+use super::caches::{WidgetCaches, canvas_layer_map, hash_json_value};
+
+pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut WidgetCaches) {
+    let props = node.props.as_object();
+    // Build layer map: either from "layers" (object) or "shapes" (array -> single layer).
+    let layer_map = canvas_layer_map(props);
+    let node_caches = caches.canvas_caches.entry(node.id.clone()).or_default();
+
+    // Update or create caches for each layer.
+    for (layer_name, shapes_val) in &layer_map {
+        let hash = {
+            let mut hasher = DefaultHasher::new();
+            hash_json_value(shapes_val, &mut hasher);
+            hasher.finish()
+        };
+        match node_caches.get_mut(layer_name) {
+            Some((existing_hash, cache)) => {
+                if *existing_hash != hash {
+                    cache.clear();
+                    // Update just the hash, keep the same cache object.
+                    *existing_hash = hash;
+                }
+            }
+            None => {
+                node_caches.insert(layer_name.clone(), (hash, canvas::Cache::new()));
+            }
+        }
+    }
+
+    // Remove stale layers that are no longer in the tree.
+    node_caches.retain(|name, _| layer_map.contains_key(name));
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::caches::{canvas_layer_map, hash_str};

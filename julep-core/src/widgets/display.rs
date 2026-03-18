@@ -291,7 +291,7 @@ pub(crate) fn render_image<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 // SVG
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_svg<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_svg<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     use iced::widget::Svg;
 
     let props = node.props.as_object();
@@ -404,7 +404,10 @@ pub(crate) fn render_markdown<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Ele
 // Progress Bar
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_progress_bar<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_progress_bar<'a>(
+    node: &'a TreeNode,
+    _ctx: RenderCtx<'a>,
+) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f32(props);
     let value = prop_f32(props, "value")
@@ -461,7 +464,7 @@ pub(crate) fn render_progress_bar<'a>(node: &'a TreeNode) -> Element<'a, Message
 // Rule (horizontal/vertical divider)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_rule<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_rule<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let direction = prop_str(props, "direction").unwrap_or_default();
 
@@ -541,7 +544,7 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode) -> Element<'a, Message> {
 // Space
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_space<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_space<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);
     let height = prop_length(props, "height", Length::Shrink);
@@ -650,4 +653,75 @@ pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
     .width(Length::Fixed(pixel_size))
     .height(Length::Fixed(pixel_size))
     .into()
+}
+
+// ---------------------------------------------------------------------------
+// Cache ensure functions
+// ---------------------------------------------------------------------------
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+use iced::widget::markdown;
+
+use super::caches::{WidgetCaches, hash_str};
+
+pub(crate) fn ensure_markdown_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+    let props = node.props.as_object();
+    let content_str = prop_str(props, "content").unwrap_or_default();
+    let code_theme_str = prop_str(props, "code_theme").unwrap_or_default();
+    let hash = hash_str(&format!("{content_str}\0{code_theme_str}"));
+    match caches.markdown_items.get(&node.id) {
+        Some((existing_hash, _)) if *existing_hash == hash => {}
+        _ => {
+            let code_theme = match code_theme_str.as_str() {
+                "base16_mocha" => Some(iced::highlighter::Theme::Base16Mocha),
+                "base16_ocean" => Some(iced::highlighter::Theme::Base16Ocean),
+                "base16_eighties" => Some(iced::highlighter::Theme::Base16Eighties),
+                "solarized_dark" => Some(iced::highlighter::Theme::SolarizedDark),
+                "inspired_github" => Some(iced::highlighter::Theme::InspiredGitHub),
+                "" => None,
+                other => {
+                    log::warn!("unknown code_theme {:?}, using default", other);
+                    None
+                }
+            };
+            let items: Vec<_> = if let Some(theme) = code_theme {
+                let mut md = markdown::Content::new().code_theme(theme);
+                md.push_str(&content_str);
+                md.items().to_vec()
+            } else {
+                markdown::parse(&content_str).collect()
+            };
+            caches.markdown_items.insert(node.id.clone(), (hash, items));
+        }
+    }
+}
+
+pub(crate) fn ensure_qr_code_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+    let props = node.props.as_object();
+    let data = prop_str(props, "data").unwrap_or_default();
+    let cell_size = prop_f32(props, "cell_size").unwrap_or(4.0);
+    let ec = prop_str(props, "error_correction").unwrap_or_default();
+    // Hash data + cell_size + error_correction for cache invalidation.
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    cell_size.to_bits().hash(&mut hasher);
+    ec.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    match caches.qr_code_caches.get_mut(&node.id) {
+        Some((existing_hash, cache)) => {
+            if *existing_hash != hash {
+                cache.clear();
+                // Update just the hash, keep the same cache object.
+                *existing_hash = hash;
+            }
+        }
+        None => {
+            caches
+                .qr_code_caches
+                .insert(node.id.clone(), (hash, canvas::Cache::new()));
+        }
+    }
 }

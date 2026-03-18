@@ -1022,7 +1022,7 @@ pub(crate) fn render_radio<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 // Slider
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
     let value = prop_f64(props, "value").unwrap_or(*range.start());
@@ -1143,7 +1143,10 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
 // Vertical Slider
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_vertical_slider<'a>(node: &'a TreeNode) -> Element<'a, Message> {
+pub(crate) fn render_vertical_slider<'a>(
+    node: &'a TreeNode,
+    _ctx: RenderCtx<'a>,
+) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
     let value = prop_f64(props, "value").unwrap_or(*range.start());
@@ -1517,4 +1520,50 @@ pub(crate) fn render_combo_box<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
     }
 
     container(cb).id(widget::Id::from(node.id.clone())).into()
+}
+
+// ---------------------------------------------------------------------------
+// Cache ensure functions
+// ---------------------------------------------------------------------------
+
+use super::caches::{WidgetCaches, hash_str};
+
+pub(crate) fn ensure_text_editor_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+    let props = node.props.as_object();
+    let content_str = prop_str(props, "content").unwrap_or_default();
+    let prop_hash = hash_str(&content_str);
+    let prev_hash = caches.editor_content_hashes.get(&node.id).copied();
+    if prev_hash != Some(prop_hash) {
+        // Host changed the content prop -- (re)create the Content.
+        caches.editor_contents.insert(
+            node.id.clone(),
+            text_editor::Content::with_text(&content_str),
+        );
+        caches
+            .editor_content_hashes
+            .insert(node.id.clone(), prop_hash);
+    }
+    // If hash matches, Content is already initialized and we preserve
+    // any user edits that happened since the last prop sync.
+}
+
+pub(crate) fn ensure_combo_box_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+    let props = node.props.as_object();
+    let options: Vec<String> = props
+        .and_then(|p| p.get("options"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let cached_options = caches.combo_options.get(&node.id);
+    let options_changed = cached_options.is_none_or(|cached| *cached != options);
+    if options_changed {
+        caches
+            .combo_states
+            .insert(node.id.clone(), combo_box::State::new(options.clone()));
+        caches.combo_options.insert(node.id.clone(), options);
+    }
 }

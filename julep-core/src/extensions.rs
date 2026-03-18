@@ -338,7 +338,7 @@ impl Default for ExtensionCaches {
 }
 
 // ---------------------------------------------------------------------------
-// WidgetEnv and RenderContext
+// WidgetEnv and RenderCtx
 // ---------------------------------------------------------------------------
 
 /// Context provided to extension `render()` methods.
@@ -348,19 +348,13 @@ impl Default for ExtensionCaches {
 ///
 /// # Available data
 ///
-/// - `caches` -- immutable access to extension caches. Use
+/// - `caches` -- extension caches (read-only). Use
 ///   `caches.get::<T>(config_key, node_id)` to read per-node state
 ///   populated in `prepare()`.
-/// - `images` -- read-only access to the image registry for resolving
-///   image handles created via `create_image` commands.
-/// - `theme` -- current iced `Theme`. Use `theme.palette()` for color
-///   access (primary, background, text, etc.).
-/// - `render_ctx` -- render context for recursively rendering child nodes.
-///   Call `render_ctx.render_child(child_node)` to produce an `Element`
-///   for a child `TreeNode`.
-/// - `default_text_size` -- global default text size from the host's
-///   Settings message, if set. `None` means iced's built-in default.
-/// - `default_font` -- global default font from Settings, if set.
+/// - `ctx` -- the shared [`RenderCtx`] carrying images, theme,
+///   defaults, and child rendering. Convenience methods below
+///   delegate to it: `images()`, `theme()`, `default_text_size()`,
+///   `default_font()`, `render_child()`.
 pub struct WidgetEnv<'a> {
     pub caches: &'a ExtensionCaches,
     pub ctx: RenderCtx<'a>,
@@ -394,9 +388,6 @@ pub struct RenderCtx<'a> {
     pub default_text_size: Option<f32>,
     pub default_font: Option<iced::Font>,
 }
-
-/// Type alias for backwards compatibility with extension crates.
-pub type RenderContext<'a> = RenderCtx<'a>;
 
 impl<'a> RenderCtx<'a> {
     /// Render a child node through the main dispatch.

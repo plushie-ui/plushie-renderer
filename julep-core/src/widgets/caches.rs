@@ -18,7 +18,6 @@ use iced::widget::canvas as iced_canvas;
 use iced::widget::{combo_box, markdown, pane_grid, text_editor};
 use serde_json::Value;
 
-use super::helpers::*;
 use crate::protocol::TreeNode;
 
 /// Maximum recursion depth for tree walks (render, ensure_caches, prepare).
@@ -35,32 +34,70 @@ const MAX_HASH_DEPTH: usize = 256;
 // Widget caches
 // ---------------------------------------------------------------------------
 
-/// Per-widget mutable state that persists across renders.
-///
-/// Fields are `pub(crate)` to avoid leaking internal HashMap structure
-/// to extension authors. The renderer binary accesses specific entries
-/// through the accessor methods below.
-pub struct WidgetCaches {
-    pub(crate) editor_contents: HashMap<String, text_editor::Content>,
-    /// Tracks the hash of the last-synced "content" prop for each text_editor.
-    /// Used to detect host-side prop changes without clobbering user edits.
-    pub(crate) editor_content_hashes: HashMap<String, u64>,
-    pub(crate) markdown_items: HashMap<String, (u64, Vec<markdown::Item>)>,
-    pub(crate) combo_states: HashMap<String, combo_box::State<String>>,
-    pub(crate) combo_options: HashMap<String, Vec<String>>,
-    pub(crate) pane_grid_states: HashMap<String, pane_grid::State<String>>,
-    /// Per-canvas, per-layer geometry caches. Outer key is node ID, inner key
-    /// is layer name. The u64 is a content hash of the layer's shapes array --
-    /// when it changes the cache is cleared so the layer re-tessellates.
-    pub(crate) canvas_caches: HashMap<String, HashMap<String, (u64, iced_canvas::Cache)>>,
-    /// Per-qr_code caches. Key is node ID, value is (content hash, canvas Cache).
-    pub(crate) qr_code_caches: HashMap<String, (u64, iced_canvas::Cache)>,
-    /// Resolved themes for Themer widget nodes. Populated in ensure_caches()
-    /// so render_themer() can borrow them with the correct lifetime.
-    pub(crate) themer_themes: HashMap<String, iced::Theme>,
-    /// Extension-owned caches. Public so extension authors can access
-    /// their own cached state during render/prepare/cleanup.
-    pub extension: crate::extensions::ExtensionCaches,
+/// Generates the [`WidgetCaches`] struct with automatic `new()`,
+/// `clear_builtin()`, and `prune_stale()` implementations. Adding a
+/// new cache field only requires adding it to this macro invocation --
+/// clear and prune can never fall out of sync.
+macro_rules! define_caches {
+    ($($(#[$meta:meta])* $field:ident : $value:ty),* $(,)?) => {
+        /// Per-widget mutable state that persists across renders.
+        ///
+        /// Fields are `pub(crate)` to avoid leaking internal HashMap
+        /// structure to extension authors. The renderer binary accesses
+        /// specific entries through the accessor methods below.
+        pub struct WidgetCaches {
+            $($(#[$meta])* pub(crate) $field: HashMap<String, $value>,)*
+            /// Extension-owned caches. Public so extension authors can
+            /// access their own cached state during render/prepare/cleanup.
+            pub extension: crate::extensions::ExtensionCaches,
+        }
+
+        impl WidgetCaches {
+            pub fn new() -> Self {
+                Self {
+                    $($field: HashMap::new(),)*
+                    extension: crate::extensions::ExtensionCaches::new(),
+                }
+            }
+
+            /// Clear per-node widget caches without touching extension caches.
+            ///
+            /// Used by the Snapshot handler so that extension cleanup callbacks
+            /// (via `ExtensionDispatcher::prepare_all`) can run before the
+            /// extension cache entries are removed.
+            pub fn clear_builtin(&mut self) {
+                $(self.$field.clear();)*
+            }
+
+            /// Remove entries whose node IDs are no longer in the live set.
+            fn prune_stale(&mut self, live_ids: &HashSet<String>) {
+                $(self.$field.retain(|id, _| live_ids.contains(id));)*
+            }
+        }
+    };
+}
+
+define_caches! {
+    /// text_editor Content state (preserves cursor, undo history).
+    editor_contents: text_editor::Content,
+    /// Hash of last-synced "content" prop per text_editor. Detects
+    /// host-side prop changes without clobbering user edits.
+    editor_content_hashes: u64,
+    /// Parsed markdown items with content hash for invalidation.
+    markdown_items: (u64, Vec<markdown::Item>),
+    /// combo_box filter/selection state.
+    combo_states: combo_box::State<String>,
+    /// combo_box option lists for change detection.
+    combo_options: Vec<String>,
+    /// pane_grid layout state.
+    pane_grid_states: pane_grid::State<String>,
+    /// Per-canvas, per-layer geometry caches. Inner key is layer name,
+    /// u64 is content hash for invalidation.
+    canvas_caches: HashMap<String, (u64, iced_canvas::Cache)>,
+    /// Per-qr_code caches (content hash, canvas Cache).
+    qr_code_caches: (u64, iced_canvas::Cache),
+    /// Resolved themes for Themer widget nodes.
+    themer_themes: iced::Theme,
 }
 
 impl Default for WidgetCaches {
@@ -70,21 +107,6 @@ impl Default for WidgetCaches {
 }
 
 impl WidgetCaches {
-    pub fn new() -> Self {
-        Self {
-            editor_contents: HashMap::new(),
-            editor_content_hashes: HashMap::new(),
-            markdown_items: HashMap::new(),
-            combo_states: HashMap::new(),
-            combo_options: HashMap::new(),
-            pane_grid_states: HashMap::new(),
-            canvas_caches: HashMap::new(),
-            qr_code_caches: HashMap::new(),
-            themer_themes: HashMap::new(),
-            extension: crate::extensions::ExtensionCaches::new(),
-        }
-    }
-
     pub fn clear(&mut self) {
         self.clear_builtin();
         self.extension.clear();
@@ -108,23 +130,6 @@ impl WidgetCaches {
     pub fn pane_grid_state(&self, id: &str) -> Option<&pane_grid::State<String>> {
         self.pane_grid_states.get(id)
     }
-
-    /// Clear per-node widget caches without touching extension caches.
-    ///
-    /// Used by the Snapshot handler so that extension cleanup callbacks
-    /// (via `ExtensionDispatcher::prepare_all`) can run before the
-    /// extension cache entries are removed.
-    pub fn clear_builtin(&mut self) {
-        self.editor_contents.clear();
-        self.editor_content_hashes.clear();
-        self.markdown_items.clear();
-        self.combo_states.clear();
-        self.combo_options.clear();
-        self.pane_grid_states.clear();
-        self.canvas_caches.clear();
-        self.qr_code_caches.clear();
-        self.themer_themes.clear();
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,16 +137,17 @@ impl WidgetCaches {
 // ---------------------------------------------------------------------------
 
 /// Walk the tree and ensure that every `text_editor`, `markdown`,
-/// `combo_box`, `pane_grid`, `canvas`, and `qr_code` node has an entry in
-/// the corresponding cache. This must be called *before* `render` so that
-/// `render` can work with shared (`&`) references to the caches.
+/// `combo_box`, `pane_grid`, `canvas`, `qr_code`, and `themer` node has
+/// an entry in the corresponding cache. This must be called *before*
+/// `render` so that `render` can work with shared (`&`) references to
+/// the caches.
 ///
 /// After populating caches, prunes stale entries for nodes no longer in the
 /// tree across all cache types.
 pub fn ensure_caches(node: &TreeNode, caches: &mut WidgetCaches) {
     let mut live_ids = HashSet::new();
     ensure_caches_walk(node, caches, &mut live_ids, 0);
-    prune_all_stale_caches(&live_ids, caches);
+    caches.prune_stale(&live_ids);
 }
 
 /// Inner recursive walk: populate caches and collect live node IDs.
@@ -161,199 +167,13 @@ fn ensure_caches_walk(
     live_ids.insert(node.id.clone());
 
     match node.type_name.as_str() {
-        "text_editor" => {
-            let props = node.props.as_object();
-            let content_str = prop_str(props, "content").unwrap_or_default();
-            let prop_hash = hash_str(&content_str);
-            let prev_hash = caches.editor_content_hashes.get(&node.id).copied();
-            if prev_hash != Some(prop_hash) {
-                // Host changed the content prop -- (re)create the Content.
-                caches.editor_contents.insert(
-                    node.id.clone(),
-                    text_editor::Content::with_text(&content_str),
-                );
-                caches
-                    .editor_content_hashes
-                    .insert(node.id.clone(), prop_hash);
-            }
-            // If hash matches, Content is already initialized and we preserve
-            // any user edits that happened since the last prop sync.
-        }
-        "markdown" => {
-            let props = node.props.as_object();
-            let content_str = prop_str(props, "content").unwrap_or_default();
-            let code_theme_str = prop_str(props, "code_theme").unwrap_or_default();
-            let hash = hash_str(&format!("{content_str}\0{code_theme_str}"));
-            match caches.markdown_items.get(&node.id) {
-                Some((existing_hash, _)) if *existing_hash == hash => {}
-                _ => {
-                    let code_theme = match code_theme_str.as_str() {
-                        "base16_mocha" => Some(iced::highlighter::Theme::Base16Mocha),
-                        "base16_ocean" => Some(iced::highlighter::Theme::Base16Ocean),
-                        "base16_eighties" => Some(iced::highlighter::Theme::Base16Eighties),
-                        "solarized_dark" => Some(iced::highlighter::Theme::SolarizedDark),
-                        "inspired_github" => Some(iced::highlighter::Theme::InspiredGitHub),
-                        "" => None,
-                        other => {
-                            log::warn!("unknown code_theme {:?}, using default", other);
-                            None
-                        }
-                    };
-                    let items: Vec<_> = if let Some(theme) = code_theme {
-                        let mut md = markdown::Content::new().code_theme(theme);
-                        md.push_str(&content_str);
-                        md.items().to_vec()
-                    } else {
-                        markdown::parse(&content_str).collect()
-                    };
-                    caches.markdown_items.insert(node.id.clone(), (hash, items));
-                }
-            }
-        }
-        "combo_box" => {
-            let props = node.props.as_object();
-            let options: Vec<String> = props
-                .and_then(|p| p.get("options"))
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let cached_options = caches.combo_options.get(&node.id);
-            let options_changed = cached_options.is_none_or(|cached| *cached != options);
-            if options_changed {
-                caches
-                    .combo_states
-                    .insert(node.id.clone(), combo_box::State::new(options.clone()));
-                caches.combo_options.insert(node.id.clone(), options);
-            }
-        }
-        "pane_grid" => {
-            let props = node.props.as_object();
-            let axis = match prop_str(props, "split_axis").as_deref() {
-                Some("horizontal") => pane_grid::Axis::Horizontal,
-                _ => pane_grid::Axis::Vertical,
-            };
-            let child_ids: HashSet<String> = node.children.iter().map(|c| c.id.clone()).collect();
-
-            if let Some(state) = caches.pane_grid_states.get_mut(&node.id) {
-                // Prune panes whose child nodes no longer exist.
-                let stale_panes: Vec<pane_grid::Pane> = state
-                    .panes
-                    .iter()
-                    .filter(|(_pane, id)| !child_ids.contains(*id))
-                    .map(|(pane, _id)| *pane)
-                    .collect();
-                for pane in stale_panes {
-                    state.close(pane);
-                }
-                // Add panes for new children that don't have a pane yet.
-                // Collect owned IDs to avoid holding an immutable borrow on
-                // state.panes while we call state.split() (mutable).
-                let existing_ids: HashSet<String> = state.panes.values().cloned().collect();
-                let new_child_ids: Vec<String> = node
-                    .children
-                    .iter()
-                    .filter(|c| !existing_ids.contains(&c.id))
-                    .map(|c| c.id.clone())
-                    .collect();
-                for new_id in new_child_ids {
-                    if let Some((&anchor, _)) = state.panes.iter().next() {
-                        let _ = state.split(axis, anchor, new_id);
-                    }
-                }
-            } else {
-                let child_list: Vec<String> = node.children.iter().map(|c| c.id.clone()).collect();
-                let new_state = if child_list.is_empty() {
-                    let (state, _) = pane_grid::State::new("default".to_string());
-                    state
-                } else if child_list.len() == 1 {
-                    let (state, _) = pane_grid::State::new(child_list[0].clone());
-                    state
-                } else {
-                    let (mut state, first_pane) = pane_grid::State::new(child_list[0].clone());
-                    let mut last_pane = first_pane;
-                    for id in child_list.iter().skip(1) {
-                        if let Some((new_pane, _)) = state.split(axis, last_pane, id.clone()) {
-                            last_pane = new_pane;
-                        }
-                    }
-                    state
-                };
-                caches.pane_grid_states.insert(node.id.clone(), new_state);
-            }
-        }
-        "canvas" => {
-            let props = node.props.as_object();
-            // Build layer map: either from "layers" (object) or "shapes" (array -> single layer).
-            let layer_map = canvas_layer_map(props);
-            let node_caches = caches.canvas_caches.entry(node.id.clone()).or_default();
-
-            // Update or create caches for each layer.
-            for (layer_name, shapes_val) in &layer_map {
-                let hash = {
-                    let mut hasher = DefaultHasher::new();
-                    hash_json_value(shapes_val, &mut hasher);
-                    hasher.finish()
-                };
-                match node_caches.get_mut(layer_name) {
-                    Some((existing_hash, cache)) => {
-                        if *existing_hash != hash {
-                            cache.clear();
-                            // Update just the hash, keep the same cache object.
-                            *existing_hash = hash;
-                        }
-                    }
-                    None => {
-                        node_caches.insert(layer_name.clone(), (hash, iced_canvas::Cache::new()));
-                    }
-                }
-            }
-
-            // Remove stale layers that are no longer in the tree.
-            node_caches.retain(|name, _| layer_map.contains_key(name));
-        }
-        "themer" => {
-            let props = node.props.as_object();
-            if let Some(resolved) = props
-                .and_then(|p| p.get("theme"))
-                .and_then(crate::theming::resolve_theme_only)
-            {
-                caches.themer_themes.insert(node.id.clone(), resolved);
-            } else {
-                // No valid theme prop -- remove stale cache entry if present.
-                caches.themer_themes.remove(&node.id);
-            }
-        }
-        "qr_code" => {
-            let props = node.props.as_object();
-            let data = prop_str(props, "data").unwrap_or_default();
-            let cell_size = prop_f32(props, "cell_size").unwrap_or(4.0);
-            let ec = prop_str(props, "error_correction").unwrap_or_default();
-            // Hash data + cell_size + error_correction for cache invalidation.
-            let mut hasher = DefaultHasher::new();
-            data.hash(&mut hasher);
-            cell_size.to_bits().hash(&mut hasher);
-            ec.hash(&mut hasher);
-            let hash = hasher.finish();
-
-            match caches.qr_code_caches.get_mut(&node.id) {
-                Some((existing_hash, cache)) => {
-                    if *existing_hash != hash {
-                        cache.clear();
-                        // Update just the hash, keep the same cache object.
-                        *existing_hash = hash;
-                    }
-                }
-                None => {
-                    caches
-                        .qr_code_caches
-                        .insert(node.id.clone(), (hash, iced_canvas::Cache::new()));
-                }
-            }
-        }
+        "text_editor" => super::input::ensure_text_editor_cache(node, caches),
+        "markdown" => super::display::ensure_markdown_cache(node, caches),
+        "combo_box" => super::input::ensure_combo_box_cache(node, caches),
+        "pane_grid" => super::layout::ensure_pane_grid_cache(node, caches),
+        "canvas" => super::canvas::ensure_canvas_cache(node, caches),
+        "themer" => super::interactive::ensure_themer_cache(node, caches),
+        "qr_code" => super::display::ensure_qr_code_cache(node, caches),
         _ => {}
     }
 
@@ -362,25 +182,8 @@ fn ensure_caches_walk(
     }
 }
 
-/// Prune all cache types, removing entries whose node IDs are no longer live.
-fn prune_all_stale_caches(live_ids: &HashSet<String>, caches: &mut WidgetCaches) {
-    caches.editor_contents.retain(|id, _| live_ids.contains(id));
-    caches
-        .editor_content_hashes
-        .retain(|id, _| live_ids.contains(id));
-    caches.markdown_items.retain(|id, _| live_ids.contains(id));
-    caches.combo_states.retain(|id, _| live_ids.contains(id));
-    caches.combo_options.retain(|id, _| live_ids.contains(id));
-    caches
-        .pane_grid_states
-        .retain(|id, _| live_ids.contains(id));
-    caches.canvas_caches.retain(|id, _| live_ids.contains(id));
-    caches.qr_code_caches.retain(|id, _| live_ids.contains(id));
-    caches.themer_themes.retain(|id, _| live_ids.contains(id));
-}
-
 // ---------------------------------------------------------------------------
-// Canvas cache helpers (used by ensure_caches)
+// Cache helpers (used by ensure_* functions in widget modules)
 // ---------------------------------------------------------------------------
 
 /// Build a sorted layer map from canvas props. Supports two prop formats:
