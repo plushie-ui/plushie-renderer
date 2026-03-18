@@ -364,7 +364,7 @@ pub(crate) fn render_window<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // ---------------------------------------------------------------------------
 
 pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
-    use crate::overlay_widget;
+    use super::overlay;
 
     let props = node.props.as_object();
     let position = prop_str(props, "position").unwrap_or_else(|| "below".to_string());
@@ -381,13 +381,13 @@ pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
     let content = ctx.render_child(&children[1]);
 
     let pos = match position.as_str() {
-        "above" => overlay_widget::Position::Above,
-        "left" => overlay_widget::Position::Left,
-        "right" => overlay_widget::Position::Right,
-        _ => overlay_widget::Position::Below,
+        "above" => overlay::Position::Above,
+        "left" => overlay::Position::Left,
+        "right" => overlay::Position::Right,
+        _ => overlay::Position::Below,
     };
 
-    overlay_widget::OverlayWrapper::new(anchor, content, pos, gap, offset_x, offset_y).into()
+    overlay::OverlayWrapper::new(anchor, content, pos, gap, offset_x, offset_y).into()
 }
 
 // ---------------------------------------------------------------------------

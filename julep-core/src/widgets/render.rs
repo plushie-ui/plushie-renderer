@@ -161,7 +161,7 @@ pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message
     };
 
     // Explicit a11y overrides take precedence.
-    let overrides = crate::a11y_widget::A11yOverrides::from_props(&node.props).or_else(|| {
+    let overrides = crate::widgets::a11y::A11yOverrides::from_props(&node.props).or_else(|| {
         // Auto-infer accessibility overrides from widget-specific props
         // when the host hasn't set an explicit a11y block.
         let props = node.props.as_object();
@@ -169,13 +169,13 @@ pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message
             // Image and SVG use iced's native .alt()/.description() methods
             // directly, so no A11yOverride wrapping needed for those.
             "text_input" | "text_editor" | "combo_box" => prop_str(props, "placeholder")
-                .map(crate::a11y_widget::A11yOverrides::with_description),
+                .map(crate::widgets::a11y::A11yOverrides::with_description),
             _ => None,
         }
     });
 
     if let Some(overrides) = overrides {
-        return crate::a11y_widget::A11yOverride::wrap(element, overrides).into();
+        return crate::widgets::a11y::A11yOverride::wrap(element, overrides).into();
     }
 
     element
@@ -471,14 +471,14 @@ mod tests {
 
     /// Helper: extract auto-inferred overrides the same way render() does,
     /// without actually rendering (avoids needing image handles etc.).
-    fn infer_a11y_overrides(node: &TreeNode) -> Option<crate::a11y_widget::A11yOverrides> {
-        crate::a11y_widget::A11yOverrides::from_props(&node.props).or_else(|| {
+    fn infer_a11y_overrides(node: &TreeNode) -> Option<crate::widgets::a11y::A11yOverrides> {
+        crate::widgets::a11y::A11yOverrides::from_props(&node.props).or_else(|| {
             let props = node.props.as_object();
             match node.type_name.as_str() {
                 // Image and SVG use iced's native .alt()/.description() methods
                 // directly, so no A11yOverride wrapping needed for those.
                 "text_input" | "text_editor" | "combo_box" => prop_str(props, "placeholder")
-                    .map(crate::a11y_widget::A11yOverrides::with_description),
+                    .map(crate::widgets::a11y::A11yOverrides::with_description),
                 _ => None,
             }
         })

@@ -18,7 +18,7 @@
 //!
 //! **Widgets:**
 //! - [`widgets`] -- tree node to iced widget rendering (all widget types)
-//! - [`overlay_widget`] -- custom `Widget` + `Overlay` impl for positioned overlays
+//! - [`widgets::overlay`] -- custom `Widget` + `Overlay` impl for positioned overlays
 //!
 //! **Protocol:**
 //! - [`protocol`] -- wire message parsing and event serialization
@@ -53,7 +53,6 @@ pub mod engine;
 pub mod extensions;
 pub mod image_registry;
 pub mod message;
-pub mod overlay_widget;
 pub mod prelude;
 pub mod prop_helpers;
 pub mod protocol;
@@ -61,8 +60,6 @@ pub mod testing;
 pub mod theming;
 pub mod tree;
 pub mod widgets;
-
-pub(crate) mod a11y_widget;
 
 // Re-export iced so extension crates can use `julep_core::iced::*` without
 // adding a direct iced dependency. This avoids version conflicts when

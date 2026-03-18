@@ -3,6 +3,7 @@
 //! The public API is [`render`] (immutable dispatch) and [`ensure_caches`]
 //! (mutable cache pre-population). See [`WidgetCaches`] for the cache bundle.
 
+pub(crate) mod a11y;
 mod caches;
 mod canvas;
 mod display;
@@ -10,6 +11,7 @@ mod helpers;
 mod input;
 mod interactive;
 mod layout;
+pub(crate) mod overlay;
 mod render;
 mod table;
 mod validate;
