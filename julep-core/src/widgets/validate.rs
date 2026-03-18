@@ -1,7 +1,20 @@
+//! Debug-mode prop validation.
+//!
+//! When enabled, [`validate_props`] checks each node's props against a
+//! schema of expected prop names and types per widget type. Unexpected
+//! names or type mismatches are logged as warnings.
+//!
+//! Enabled unconditionally in debug builds. In release builds, the host
+//! can opt in via `validate_props: true` in the Settings message.
+
 use std::sync::OnceLock;
 
 use crate::protocol::TreeNode;
 use serde_json::Value;
+
+/// Props accepted by all widget types. Checked before widget-specific
+/// schemas so they don't appear as "unexpected" in validation warnings.
+const UNIVERSAL_PROPS: &[&str] = &["a11y", "id"];
 
 /// Global flag to enable prop validation in release builds.
 /// Set via `set_validate_props(true)` during settings init.
@@ -123,7 +136,6 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("style", Any),
             ("icon", Any),
             ("disabled", Bool),
-            ("id", Str),
             ("on_submit", Any),
             ("on_paste", Bool),
             ("align_x", Str),
@@ -304,6 +316,7 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("menu_style", Any),
         ],
         "text_editor" => &[
+            ("content", Str),
             ("placeholder", Str),
             ("height", Length),
             ("width", Number),
@@ -428,7 +441,12 @@ pub(crate) fn validate_props(node: &TreeNode) {
             ("cell_color", Color),
             ("background_color", Color),
         ],
-        "window" => &[("padding", Any), ("width", Length), ("height", Length)],
+        "window" => &[
+            ("padding", Any),
+            ("width", Length),
+            ("height", Length),
+            ("scale_factor", Number),
+        ],
         _ => return, // Unknown widget type -- skip validation
     };
 
@@ -440,6 +458,10 @@ pub(crate) fn validate_props(node: &TreeNode) {
     let expected_names: Vec<&str> = expected.iter().map(|(name, _)| *name).collect();
 
     for (key, val) in props {
+        // Skip props accepted by all widget types.
+        if UNIVERSAL_PROPS.contains(&key.as_str()) {
+            continue;
+        }
         match expected.iter().find(|(name, _)| name == key) {
             Some((_, expected_type)) => {
                 if !prop_type_matches(val, *expected_type) {
