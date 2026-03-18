@@ -274,11 +274,11 @@ impl Session {
     ///
     /// For each iced event that produces widget Messages:
     /// 1. The event is injected and Messages are captured
-    /// 2. Messages are converted to OutgoingEvents
+    /// 2. Messages are converted to OutgoingEvents (with session set)
     /// 3. An `interact_step` is emitted with those events
-    /// 4. The `wait_for_snapshot` callback is called, which blocks
-    ///    until the host sends back an updated tree
-    /// 5. The snapshot is applied, caches/extensions prepared, UI settled
+    /// 4. The `read_next` callback is called, which blocks until the
+    ///    host sends back a tree update (Snapshot or Patch)
+    /// 5. The tree update is applied, caches/extensions prepared, UI settled
     ///
     /// This matches the production flow where each iced event triggers
     /// a full host round-trip before the next event is processed.
@@ -286,19 +286,21 @@ impl Session {
     /// For events that produce no widget Messages (e.g. CursorMoved),
     /// no step is emitted and the loop continues immediately.
     ///
-    /// Only available in headless mode (returns empty in mock mode).
+    /// Returns `true` if any events were captured and emitted via
+    /// interact_step, `false` if no widget Messages were produced.
+    /// Only available in headless mode (returns false in mock mode).
     fn inject_and_capture(
         &mut self,
         session_id: &str,
         interact_id: &str,
         events: &[Event],
-        wait_for_snapshot: &mut dyn FnMut() -> Option<IncomingMessage>,
-    ) -> Vec<OutgoingEvent> {
+        read_next: &mut dyn FnMut() -> Option<IncomingMessage>,
+    ) -> bool {
         if self.ui.is_none() || events.is_empty() {
-            return vec![];
+            return false;
         }
 
-        let mut all_events = Vec::new();
+        let mut emitted_steps = false;
 
         for event in events {
             // Update cursor from CursorMoved events before injection.
@@ -319,32 +321,37 @@ impl Session {
                 .unwrap_or_default();
 
             // Convert captured Messages to OutgoingEvents.
-            let step_events = self.process_captured_messages(messages);
+            let step_events: Vec<OutgoingEvent> = self
+                .process_captured_messages(messages)
+                .into_iter()
+                .map(|e| e.with_session(session_id))
+                .collect();
 
             if !step_events.is_empty() {
+                emitted_steps = true;
+
                 // Emit an interact_step so the host can process
                 // these events and send back an updated tree.
-                let step = serde_json::json!({
-                    "type": "interact_step",
-                    "session": session_id,
-                    "id": interact_id,
-                    "events": step_events.iter()
-                        .map(|e| serde_json::to_value(e).unwrap_or_default())
-                        .collect::<Vec<_>>(),
-                });
+                let step = julep_core::protocol::InteractResponse {
+                    message_type: "interact_step",
+                    session: session_id.to_string(),
+                    id: interact_id.to_string(),
+                    events: step_events,
+                };
                 if self.writer.emit(&step).is_err() {
                     break;
                 }
 
-                all_events.extend(step_events);
-
-                // Wait for the host to send back a snapshot with
-                // the updated tree. This is the round-trip that
-                // matches production's per-event update cycle.
-                if let Some(snapshot_msg) = wait_for_snapshot() {
-                    // Apply the snapshot through the normal path.
-                    let is_snapshot = matches!(snapshot_msg, IncomingMessage::Snapshot { .. });
-                    let effects = self.core.apply(snapshot_msg);
+                // Read the next message from the host. In the normal
+                // flow this is a Snapshot or Patch with the updated
+                // tree. We apply whatever arrives through the normal
+                // path so tree changes, settings updates, etc. all work.
+                if let Some(msg) = read_next() {
+                    let is_tree_change = matches!(
+                        msg,
+                        IncomingMessage::Snapshot { .. } | IncomingMessage::Patch { .. }
+                    );
+                    let effects = self.core.apply(msg);
                     for effect in effects {
                         use julep_core::engine::CoreEffect;
                         match effect {
@@ -355,12 +362,9 @@ impl Session {
                             _ => {}
                         }
                     }
-                    if is_snapshot {
-                        self.dispatcher.clear_poisoned();
-                        if let Some(root) = self.core.tree.root() {
-                            self.dispatcher
-                                .prepare_all(root, &mut self.ext_caches, &self.theme);
-                        }
+                    if is_tree_change && let Some(root) = self.core.tree.root() {
+                        self.dispatcher
+                            .prepare_all(root, &mut self.ext_caches, &self.theme);
                     }
                 }
             }
@@ -370,7 +374,7 @@ impl Session {
             self.settle_ui();
         }
 
-        all_events
+        emitted_steps
     }
 
     /// Convert iced Messages to OutgoingEvents using the same
@@ -619,26 +623,29 @@ fn handle_message(
             let events = if s.ui.is_some() && !iced_events.is_empty() {
                 // Headless mode: inject real iced events one at a time
                 // with host round-trips between events that produce
-                // widget Messages. This matches production's per-event
-                // update cycle where the host re-renders and sends a
-                // snapshot between each event.
-                let mut captured = s.inject_and_capture(session_id, &id, &iced_events, read_next);
+                // widget Messages. Events are delivered to the host
+                // via interact_step messages during injection.
+                let had_steps = s.inject_and_capture(session_id, &id, &iced_events, read_next);
 
-                // Some actions have no iced equivalent (paste, sort,
-                // canvas, slide, pane_focus_cycle). For these,
-                // interaction_to_iced_events returns empty and we fall
-                // through to synthetic events below.
-                if captured.is_empty() {
-                    captured = crate::scripting::build_interact_response(
+                if had_steps {
+                    // Events were already delivered via interact_step.
+                    // Final response is a completion signal with no
+                    // events to avoid double-dispatch.
+                    vec![]
+                } else {
+                    // No events captured -- action has no iced
+                    // equivalent (paste, sort, canvas, slide, etc.).
+                    // Fall back to synthetic events in the final
+                    // response (no steps were emitted).
+                    crate::scripting::build_interact_response(
                         &s.core,
                         id.clone(),
                         action,
                         selector,
                         payload,
                     )
-                    .events;
+                    .events
                 }
-                captured
             } else {
                 // Mock mode (no UI) or action with no iced events:
                 // use synthetic event construction.
@@ -652,9 +659,6 @@ fn handle_message(
                 .events
             };
 
-            // Emit interact_complete to signal the interaction is
-            // done. This is used by the host to know when to stop
-            // waiting for interact_step messages.
             let resp =
                 julep_core::protocol::InteractResponse::new(id, events).with_session(session_id);
             s.writer.emit(&resp)?;
