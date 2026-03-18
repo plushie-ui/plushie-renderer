@@ -1,9 +1,19 @@
+//! Canvas widget: 2D drawing surface with per-layer caching.
+//!
+//! Renders shapes (rect, circle, line, arc, path, text, image) from
+//! JSON prop data. Supports multiple named layers with content-hash
+//! invalidation, gradient fills, clipping regions, and optional mouse
+//! event handlers.
+
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
 
 use iced::widget::canvas;
 use iced::{Color, Element, Length, Pixels, Point, Radians, Size, Vector, alignment, mouse};
 use serde_json::Value;
 
+use super::caches::{WidgetCaches, canvas_layer_map, hash_json_value};
 use super::helpers::*;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
@@ -845,11 +855,6 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 // ---------------------------------------------------------------------------
 // Cache ensure function
 // ---------------------------------------------------------------------------
-
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
-
-use super::caches::{WidgetCaches, canvas_layer_map, hash_json_value};
 
 pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
