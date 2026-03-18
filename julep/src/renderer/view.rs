@@ -9,6 +9,8 @@ use julep_core::message::Message;
 use super::App;
 
 impl App {
+    /// Render a single window's UI tree into iced `Element`s.
+    /// Called by the iced daemon for each open window on every frame.
     pub(super) fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
         let julep_id = match self.windows.get_julep(&window_id) {
             Some(id) => id,
