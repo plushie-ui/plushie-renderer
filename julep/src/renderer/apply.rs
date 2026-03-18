@@ -5,6 +5,7 @@ use std::io;
 
 use iced::Task;
 
+use julep_core::engine::CoreEffect;
 use julep_core::message::Message;
 use julep_core::protocol::IncomingMessage;
 
@@ -57,19 +58,19 @@ impl App {
         let effects = self.core.apply(message);
         for effect in effects {
             match effect {
-                julep_core::engine::CoreEffect::SyncWindows => {
+                CoreEffect::SyncWindows => {
                     let task = self.sync_windows();
                     self.pending_tasks.push(task);
                 }
-                julep_core::engine::CoreEffect::EmitEvent(event) => emit_event(event)?,
-                julep_core::engine::CoreEffect::EmitEffectResponse(response) => {
+                CoreEffect::EmitEvent(event) => emit_event(event)?,
+                CoreEffect::EmitEffectResponse(response) => {
                     emit_effect_response(response)?;
                 }
-                julep_core::engine::CoreEffect::WidgetOp { op, payload } => {
+                CoreEffect::WidgetOp { op, payload } => {
                     let task = self.handle_widget_op(&op, &payload);
                     self.pending_tasks.push(task);
                 }
-                julep_core::engine::CoreEffect::WindowOp {
+                CoreEffect::WindowOp {
                     op,
                     window_id,
                     settings,
@@ -77,14 +78,14 @@ impl App {
                     let task = self.handle_window_op(&op, &window_id, &settings);
                     self.pending_tasks.push(task);
                 }
-                julep_core::engine::CoreEffect::ThemeChanged(theme) => {
+                CoreEffect::ThemeChanged(theme) => {
                     self.theme = theme;
                     self.theme_follows_system = false;
                 }
-                julep_core::engine::CoreEffect::ThemeFollowsSystem => {
+                CoreEffect::ThemeFollowsSystem => {
                     self.theme_follows_system = true;
                 }
-                julep_core::engine::CoreEffect::ImageOp {
+                CoreEffect::ImageOp {
                     op,
                     handle,
                     data,
@@ -94,10 +95,10 @@ impl App {
                 } => {
                     self.handle_image_op(&op, &handle, data, pixels, width, height);
                 }
-                julep_core::engine::CoreEffect::ExtensionConfig(config) => {
+                CoreEffect::ExtensionConfig(config) => {
                     self.dispatcher.init_all(&config);
                 }
-                julep_core::engine::CoreEffect::SpawnAsyncEffect {
+                CoreEffect::SpawnAsyncEffect {
                     request_id,
                     effect_type,
                     params,
