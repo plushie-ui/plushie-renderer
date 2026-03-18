@@ -13,8 +13,8 @@ Two wire formats are supported. Both carry the same message structures.
 
 One JSON object per line (JSONL). No length prefix.
 
-    {"type":"settings","settings":{"default_text_size":14}}\n
-    {"type":"snapshot","tree":{"id":"root","type":"column",...}}\n
+    {"session":"","type":"settings","settings":{"default_text_size":14}}\n
+    {"session":"","type":"snapshot","tree":{"id":"root","type":"column",...}}\n
 
 ### MessagePack
 
@@ -44,6 +44,40 @@ Maximum message size: **64 MiB**. Messages exceeding this are rejected.
 
 ---
 
+## Sessions
+
+Every wire message carries a `session` field (string) identifying the
+logical session it belongs to. In single-session mode (the default),
+all messages use the same session value. In multiplexed mode
+(`--max-sessions N` with N > 1), multiple sessions run concurrently
+in separate threads, each with fully isolated state.
+
+The renderer echoes the `session` value from each incoming message
+back on the corresponding outgoing message(s). This is routing
+metadata, not message content -- the renderer does not interpret the
+session value beyond using it for dispatch.
+
+```json
+{"session": "test_42", "type": "snapshot", "tree": {...}}
+{"session": "test_42", "type": "query", "id": "q1", ...}
+```
+
+**Session lifecycle in multiplexed mode:**
+
+- A session is created implicitly when the first message with a new
+  session value arrives.
+- A `Reset` message tears down the session (thread exits, all state
+  freed). The session value can be reused -- a new session is created
+  on the next message.
+- The `--max-sessions` flag limits concurrent sessions. Messages for
+  new sessions beyond the limit are dropped with a log error.
+
+**Single-session mode:** When `--max-sessions` is 1 (or omitted),
+the renderer runs one session on the main thread with no threading
+overhead. The session field is still present on all messages.
+
+---
+
 ## Startup sequence
 
 1. Host spawns the renderer and writes a **Settings** message to stdin.
@@ -58,6 +92,7 @@ protocol version:
 ```json
 {
   "type": "hello",
+  "session": "",
   "protocol": 1,
   "version": "0.3.0",
   "name": "julep"
@@ -65,6 +100,8 @@ protocol version:
 ```
 
 The host should check that `protocol` matches the version it expects.
+The `session` field on `hello` is always empty -- it is a
+process-level message, not scoped to any session.
 
 ---
 
@@ -97,7 +134,8 @@ children of root).
 ## Incoming messages (host -> renderer)
 
 All messages are JSON objects with a `"type"` field that determines
-the message kind. Field names use `snake_case`.
+the message kind and a `"session"` field identifying the session.
+Field names use `snake_case`.
 
 ### Settings
 
@@ -509,6 +547,7 @@ User interaction or subscription event.
 ```json
 {
   "type": "event",
+  "session": "s1",
   "family": "click",
   "id": "btn-1"
 }
@@ -517,6 +556,7 @@ User interaction or subscription event.
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | string | Always `"event"` |
+| `session` | string | Session that produced this event |
 | `family` | string | Event kind (see tables below) |
 | `id` | string | Node ID that produced the event |
 | `value` | any | Event value (optional) |
@@ -659,6 +699,7 @@ Response to an EffectRequest.
 ```json
 {
   "type": "effect_response",
+  "session": "s1",
   "id": "req-1",
   "status": "ok",
   "result": { "path": "/home/user/file.txt" }
@@ -667,6 +708,7 @@ Response to an EffectRequest.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `session` | string | Session that produced this response |
 | `id` | string | Matches the request id |
 | `status` | string | `"ok"`, `"cancelled"`, or `"error"` |
 | `result` | any | Result data (when status is ok) |
