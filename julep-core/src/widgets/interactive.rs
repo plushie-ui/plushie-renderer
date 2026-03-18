@@ -1,8 +1,12 @@
+//! Interactive wrapper widgets: button, mouse_area, sensor, tooltip,
+//! themer, window, and overlay.
+
 use std::time::Duration;
 
 use iced::widget::{Space, button, container, mouse_area, sensor, text, tooltip};
 use iced::{Element, Fill, Length, mouse, widget};
 
+use super::caches::WidgetCaches;
 use super::helpers::*;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
@@ -381,8 +385,6 @@ pub(crate) fn render_overlay<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 // ---------------------------------------------------------------------------
 // Cache ensure function
 // ---------------------------------------------------------------------------
-
-use super::caches::WidgetCaches;
 
 pub(crate) fn ensure_themer_cache(node: &TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
