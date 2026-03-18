@@ -270,14 +270,30 @@ impl Session {
 
     /// Inject iced events one at a time, capturing the Messages that
     /// widgets produce. Settles the UI between each event so widget
-    /// state updates are visible to subsequent events. This matches
-    /// the production flow where each raw iced event gets a full
-    /// processing cycle.
+    /// state updates are visible to subsequent events.
     ///
-    /// Returns the captured Messages converted to OutgoingEvents
-    /// using the same conversion logic as the daemon's `update()`.
+    /// For each iced event that produces widget Messages:
+    /// 1. The event is injected and Messages are captured
+    /// 2. Messages are converted to OutgoingEvents
+    /// 3. An `interact_step` is emitted with those events
+    /// 4. The `wait_for_snapshot` callback is called, which blocks
+    ///    until the host sends back an updated tree
+    /// 5. The snapshot is applied, caches/extensions prepared, UI settled
+    ///
+    /// This matches the production flow where each iced event triggers
+    /// a full host round-trip before the next event is processed.
+    ///
+    /// For events that produce no widget Messages (e.g. CursorMoved),
+    /// no step is emitted and the loop continues immediately.
+    ///
     /// Only available in headless mode (returns empty in mock mode).
-    fn inject_and_capture(&mut self, events: &[Event]) -> Vec<OutgoingEvent> {
+    fn inject_and_capture(
+        &mut self,
+        session_id: &str,
+        interact_id: &str,
+        events: &[Event],
+        wait_for_snapshot: &mut dyn FnMut() -> Option<IncomingMessage>,
+    ) -> Vec<OutgoingEvent> {
         if self.ui.is_none() || events.is_empty() {
             return vec![];
         }
@@ -302,12 +318,55 @@ impl Session {
                 })
                 .unwrap_or_default();
 
-            // Convert captured Messages to OutgoingEvents using
-            // the same logic as the daemon's update().
-            all_events.extend(self.process_captured_messages(messages));
+            // Convert captured Messages to OutgoingEvents.
+            let step_events = self.process_captured_messages(messages);
 
-            // Settle the UI so widget state (layout, text cursors,
-            // focus) updates before the next event is processed.
+            if !step_events.is_empty() {
+                // Emit an interact_step so the host can process
+                // these events and send back an updated tree.
+                let step = serde_json::json!({
+                    "type": "interact_step",
+                    "session": session_id,
+                    "id": interact_id,
+                    "events": step_events.iter()
+                        .map(|e| serde_json::to_value(e).unwrap_or_default())
+                        .collect::<Vec<_>>(),
+                });
+                if self.writer.emit(&step).is_err() {
+                    break;
+                }
+
+                all_events.extend(step_events);
+
+                // Wait for the host to send back a snapshot with
+                // the updated tree. This is the round-trip that
+                // matches production's per-event update cycle.
+                if let Some(snapshot_msg) = wait_for_snapshot() {
+                    // Apply the snapshot through the normal path.
+                    let is_snapshot = matches!(snapshot_msg, IncomingMessage::Snapshot { .. });
+                    let effects = self.core.apply(snapshot_msg);
+                    for effect in effects {
+                        use julep_core::engine::CoreEffect;
+                        match effect {
+                            CoreEffect::ThemeChanged(t) => self.theme = t,
+                            CoreEffect::ExtensionConfig(config) => {
+                                self.dispatcher.init_all(&config);
+                            }
+                            _ => {}
+                        }
+                    }
+                    if is_snapshot {
+                        self.dispatcher.clear_poisoned();
+                        if let Some(root) = self.core.tree.root() {
+                            self.dispatcher
+                                .prepare_all(root, &mut self.ext_caches, &self.theme);
+                        }
+                    }
+                }
+            }
+
+            // Settle the UI so widget state updates before the
+            // next event is processed.
             self.settle_ui();
         }
 
@@ -438,7 +497,18 @@ impl Session {
 /// All output goes through `session.writer`. The `session_id` is
 /// echoed on every outgoing message to identify which session
 /// produced it.
-fn handle_message(s: &mut Session, session_id: &str, msg: IncomingMessage) -> io::Result<()> {
+///
+/// The `read_next` callback is used during iterative interact
+/// processing to read snapshot messages from the host between
+/// event injections. In single-session mode, it reads from stdin.
+/// In multiplexed mode, it reads from the session's mpsc channel.
+/// Returns `None` if the source is closed.
+fn handle_message(
+    s: &mut Session,
+    session_id: &str,
+    msg: IncomingMessage,
+    read_next: &mut dyn FnMut() -> Option<IncomingMessage>,
+) -> io::Result<()> {
     let is_snapshot = matches!(msg, IncomingMessage::Snapshot { .. });
     let is_tree_change = is_snapshot || matches!(msg, IncomingMessage::Patch { .. });
     let is_settings = matches!(msg, IncomingMessage::Settings { .. });
@@ -547,18 +617,18 @@ fn handle_message(s: &mut Session, session_id: &str, msg: IncomingMessage) -> io
                 interaction_to_iced_events(&action, widget_id.as_deref(), &payload, cursor);
 
             let events = if s.ui.is_some() && !iced_events.is_empty() {
-                // Headless mode: inject real iced events one at a time,
-                // capture the Messages widgets produce, and convert them
-                // using the same logic as the daemon's update(). This
-                // gives faithful event output without synthetic construction.
-                let mut captured = s.inject_and_capture(&iced_events);
+                // Headless mode: inject real iced events one at a time
+                // with host round-trips between events that produce
+                // widget Messages. This matches production's per-event
+                // update cycle where the host re-renders and sends a
+                // snapshot between each event.
+                let mut captured = s.inject_and_capture(session_id, &id, &iced_events, read_next);
 
                 // Some actions have no iced equivalent (paste, sort,
                 // canvas, slide, pane_focus_cycle). For these,
                 // interaction_to_iced_events returns empty and we fall
                 // through to synthetic events below.
                 if captured.is_empty() {
-                    // Fall back to synthetic for this action.
                     captured = crate::scripting::build_interact_response(
                         &s.core,
                         id.clone(),
@@ -582,6 +652,9 @@ fn handle_message(s: &mut Session, session_id: &str, msg: IncomingMessage) -> io
                 .events
             };
 
+            // Emit interact_complete to signal the interaction is
+            // done. This is used by the host to know when to stop
+            // waiting for interact_step messages.
             let resp =
                 julep_core::protocol::InteractResponse::new(id, events).with_session(session_id);
             s.writer.emit(&resp)?;
@@ -830,6 +903,35 @@ pub(crate) fn run(
     log::info!("stdin closed, exiting");
 }
 
+/// Read and decode the next message from a BufRead source.
+fn read_message(codec: Codec, reader: &mut impl BufRead) -> Option<SessionMessage> {
+    loop {
+        match codec.read_message(reader) {
+            Ok(None) => return None,
+            Ok(Some(bytes)) => {
+                let value: serde_json::Value = match codec.decode(&bytes) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::error!("decode error: {e}");
+                        continue;
+                    }
+                };
+                match SessionMessage::from_value(value) {
+                    Ok(sm) => return Some(sm),
+                    Err(e) => {
+                        log::error!("decode error: {e}");
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("read error: {e}");
+                return None;
+            }
+        }
+    }
+}
+
 /// Single-session event loop (max_sessions=1). Behaves like the
 /// original design: one session, direct stdout writes.
 fn run_single(
@@ -840,34 +942,15 @@ fn run_single(
 ) {
     let mut session = Session::new(dispatcher, mode, WireWriter::stdout());
 
-    loop {
-        match codec.read_message(reader) {
-            Ok(None) => break,
-            Ok(Some(bytes)) => {
-                let value: serde_json::Value = match codec.decode(&bytes) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::error!("decode error: {e}");
-                        continue;
-                    }
-                };
-                let sm = match SessionMessage::from_value(value) {
-                    Ok(sm) => sm,
-                    Err(e) => {
-                        log::error!("decode error: {e}");
-                        continue;
-                    }
-                };
+    while let Some(sm) = read_message(codec, reader) {
+        // Provide a callback that reads the next message from stdin.
+        // Used by inject_and_capture during iterative interact to
+        // wait for the host's snapshot between events.
+        let mut read_next = || read_message(codec, reader).map(|sm| sm.message);
 
-                if let Err(e) = handle_message(&mut session, &sm.session, sm.message) {
-                    log::error!("write error: {e}");
-                    break;
-                }
-            }
-            Err(e) => {
-                log::error!("read error: {e}");
-                break;
-            }
+        if let Err(e) = handle_message(&mut session, &sm.session, sm.message, &mut read_next) {
+            log::error!("write error: {e}");
+            break;
         }
     }
 }
@@ -942,8 +1025,10 @@ fn run_multiplexed(
 
                     let handle = thread::spawn(move || {
                         let mut session = Session::new(dispatcher, mode, writer);
-                        for msg in rx {
-                            if let Err(e) = handle_message(&mut session, &sid, msg) {
+                        for msg in &rx {
+                            let mut read_next = || rx.recv().ok();
+                            if let Err(e) = handle_message(&mut session, &sid, msg, &mut read_next)
+                            {
                                 log::error!("session '{sid}': write error: {e}");
                                 break;
                             }
