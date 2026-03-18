@@ -830,8 +830,9 @@ Pane grid events:
 | Family | Fields | Description |
 |--------|--------|-------------|
 | `pane_resized` | id, data: {split, ratio} | Pane divider moved |
-| `pane_dragged` | id, data: {pane, target} | Pane dragged |
+| `pane_dragged` | id, data: {action, pane, target, region, edge} | Pane dragged (action: picked/dropped/canceled) |
 | `pane_clicked` | id, data: {pane} | Pane clicked |
+| `pane_focus_cycle` | id, data: {pane} | Pane focus cycled (F6/Shift+F6) |
 
 #### Subscription events
 
@@ -1033,9 +1034,7 @@ Response to a TreeHash message.
   "session": "s1",
   "id": "th1",
   "name": "after_click",
-  "hash": "a1b2c3...",
-  "width": 0,
-  "height": 0
+  "hash": "a1b2c3..."
 }
 ```
 

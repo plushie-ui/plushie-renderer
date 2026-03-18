@@ -845,21 +845,17 @@ pub struct TreeHashResponse {
     pub id: String,
     pub name: String,
     pub hash: String,
-    pub width: u32,
-    pub height: u32,
 }
 
 #[allow(dead_code)]
 impl TreeHashResponse {
-    pub fn new(id: String, name: String, hash: String, width: u32, height: u32) -> Self {
+    pub fn new(id: String, name: String, hash: String) -> Self {
         Self {
             message_type: "tree_hash_response",
             session: String::new(),
             id,
             name,
             hash,
-            width,
-            height,
         }
     }
 

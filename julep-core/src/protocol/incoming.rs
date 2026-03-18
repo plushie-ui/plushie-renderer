@@ -58,14 +58,7 @@ pub enum IncomingMessage {
     // Used by the binary crate's headless and test modes. Appears dead
     // from julep-core's perspective because the usage is in julep/.
     #[allow(dead_code)]
-    TreeHash {
-        id: String,
-        name: String,
-        #[serde(default)]
-        theme: Value,
-        #[serde(default)]
-        viewport: Value,
-    },
+    TreeHash { id: String, name: String },
     /// Capture a pixel screenshot (GPU-rendered RGBA data).
     #[allow(dead_code)]
     ScreenshotCapture {

@@ -706,7 +706,7 @@ pub(crate) fn build_tree_hash_response(core: &Core, id: String, name: String) ->
     hasher.update(tree_json.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
 
-    TreeHashResponse::new(id, name, hash, 0, 0)
+    TreeHashResponse::new(id, name, hash)
 }
 
 /// Build and emit a TreeHashResponse to stdout.
