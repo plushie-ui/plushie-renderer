@@ -1,3 +1,6 @@
+//! Input widgets: text_input, text_editor, checkbox, toggler, radio,
+//! slider, vertical_slider, pick_list, and combo_box.
+
 use iced::widget::text::LineHeight;
 use iced::widget::{
     checkbox, combo_box, container, pick_list, slider, text, text_editor, text_input, toggler,
@@ -6,6 +9,7 @@ use iced::widget::{
 use iced::{Element, Font, Length, Pixels, keyboard, widget};
 use serde_json::Value;
 
+use super::caches::{WidgetCaches, hash_str};
 use super::helpers::*;
 use crate::extensions::RenderCtx;
 use crate::message::Message;
@@ -1022,6 +1026,21 @@ pub(crate) fn render_radio<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
 // Slider
 // ---------------------------------------------------------------------------
 
+/// Apply rail color/width overrides to a slider or vertical_slider style.
+/// Shared by both slider variants since they use the same `Rail` type.
+fn apply_rail_overrides(
+    style: &mut slider::Style,
+    rail_color: Option<iced::Color>,
+    rail_width: Option<f32>,
+) {
+    if let Some(rc) = rail_color {
+        style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
+    }
+    if let Some(rw) = rail_width {
+        style.rail.width = rw;
+    }
+}
+
 pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
@@ -1061,12 +1080,7 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elem
         let radius = prop_f32(props, "handle_radius").unwrap_or(8.0);
         s = s.style(move |theme, status| {
             let mut style = slider::default(theme, status).with_circular_handle(radius);
-            if let Some(rc) = rail_color {
-                style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
-            }
-            if let Some(rw) = rail_width {
-                style.rail.width = rw;
-            }
+            apply_rail_overrides(&mut style, rail_color, rail_width);
             style
         });
     } else if let Some(style_val) = props.and_then(|p| p.get("style")) {
@@ -1076,13 +1090,7 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elem
                     if has_rail_overrides {
                         s.style(move |theme: &iced::Theme, status| {
                             let mut style = slider::default(theme, status);
-                            if let Some(rc) = rail_color {
-                                style.rail.backgrounds =
-                                    (iced::Background::Color(rc), iced::Background::Color(rc));
-                            }
-                            if let Some(rw) = rail_width {
-                                style.rail.width = rw;
-                            }
+                            apply_rail_overrides(&mut style, rail_color, rail_width);
                             style
                         })
                     } else {
@@ -1101,18 +1109,9 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elem
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             s = s.style(move |theme: &iced::Theme, status| {
-                let mut style = match ov.preset_base.as_deref() {
-                    Some("default") => slider::default(theme, status),
-                    _ => slider::default(theme, status),
-                };
+                let mut style = slider::default(theme, status);
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
-                if let Some(rc) = rail_color {
-                    style.rail.backgrounds =
-                        (iced::Background::Color(rc), iced::Background::Color(rc));
-                }
-                if let Some(rw) = rail_width {
-                    style.rail.width = rw;
-                }
+                apply_rail_overrides(&mut style, rail_color, rail_width);
                 if matches!(status, slider::Status::Hovered) {
                     if let Some(ref f) = ov.hovered {
                         apply_slider_handle_fields(&mut style.handle, f);
@@ -1126,12 +1125,7 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elem
     } else if has_rail_overrides {
         s = s.style(move |theme: &iced::Theme, status| {
             let mut style = slider::default(theme, status);
-            if let Some(rc) = rail_color {
-                style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
-            }
-            if let Some(rw) = rail_width {
-                style.rail.width = rw;
-            }
+            apply_rail_overrides(&mut style, rail_color, rail_width);
             style
         });
     }
@@ -1187,13 +1181,7 @@ pub(crate) fn render_vertical_slider<'a>(
                     if has_rail_overrides {
                         s.style(move |theme: &iced::Theme, status| {
                             let mut style = vertical_slider::default(theme, status);
-                            if let Some(rc) = rail_color {
-                                style.rail.backgrounds =
-                                    (iced::Background::Color(rc), iced::Background::Color(rc));
-                            }
-                            if let Some(rw) = rail_width {
-                                style.rail.width = rw;
-                            }
+                            apply_rail_overrides(&mut style, rail_color, rail_width);
                             style
                         })
                     } else {
@@ -1212,18 +1200,9 @@ pub(crate) fn render_vertical_slider<'a>(
         } else if let Some(obj) = style_val.as_object() {
             let ov = parse_style_overrides(obj);
             s = s.style(move |theme: &iced::Theme, status| {
-                let mut style = match ov.preset_base.as_deref() {
-                    Some("default") => vertical_slider::default(theme, status),
-                    _ => vertical_slider::default(theme, status),
-                };
+                let mut style = vertical_slider::default(theme, status);
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
-                if let Some(rc) = rail_color {
-                    style.rail.backgrounds =
-                        (iced::Background::Color(rc), iced::Background::Color(rc));
-                }
-                if let Some(rw) = rail_width {
-                    style.rail.width = rw;
-                }
+                apply_rail_overrides(&mut style, rail_color, rail_width);
                 if matches!(status, vertical_slider::Status::Hovered) {
                     if let Some(ref f) = ov.hovered {
                         apply_slider_handle_fields(&mut style.handle, f);
@@ -1237,12 +1216,7 @@ pub(crate) fn render_vertical_slider<'a>(
     } else if has_rail_overrides {
         s = s.style(move |theme: &iced::Theme, status| {
             let mut style = vertical_slider::default(theme, status);
-            if let Some(rc) = rail_color {
-                style.rail.backgrounds = (iced::Background::Color(rc), iced::Background::Color(rc));
-            }
-            if let Some(rw) = rail_width {
-                style.rail.width = rw;
-            }
+            apply_rail_overrides(&mut style, rail_color, rail_width);
             style
         });
     }
@@ -1525,8 +1499,6 @@ pub(crate) fn render_combo_box<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
 // ---------------------------------------------------------------------------
 // Cache ensure functions
 // ---------------------------------------------------------------------------
-
-use super::caches::{WidgetCaches, hash_str};
 
 pub(crate) fn ensure_text_editor_cache(node: &TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
