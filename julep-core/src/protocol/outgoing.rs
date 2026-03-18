@@ -318,18 +318,20 @@ impl OutgoingEvent {
         }
     }
 
-    pub fn window_closed(tag: String, window_id: String) -> Self {
+    /// Window event carrying only a window_id in its data payload.
+    fn window_event(family: &str, tag: String, window_id: String) -> Self {
         Self {
             data: Some(serde_json::json!({"window_id": window_id})),
-            ..Self::tagged("window_closed", tag)
+            ..Self::tagged(family, tag)
         }
     }
 
+    pub fn window_closed(tag: String, window_id: String) -> Self {
+        Self::window_event("window_closed", tag, window_id)
+    }
+
     pub fn window_close_requested(tag: String, window_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"window_id": window_id})),
-            ..Self::tagged("window_close_requested", tag)
-        }
+        Self::window_event("window_close_requested", tag, window_id)
     }
 
     pub fn window_moved(tag: String, window_id: String, x: f32, y: f32) -> Self {
@@ -355,17 +357,11 @@ impl OutgoingEvent {
     }
 
     pub fn window_focused(tag: String, window_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"window_id": window_id})),
-            ..Self::tagged("window_focused", tag)
-        }
+        Self::window_event("window_focused", tag, window_id)
     }
 
     pub fn window_unfocused(tag: String, window_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"window_id": window_id})),
-            ..Self::tagged("window_unfocused", tag)
-        }
+        Self::window_event("window_unfocused", tag, window_id)
     }
 
     pub fn window_rescaled(tag: String, window_id: String, scale_factor: f32) -> Self {
@@ -399,10 +395,7 @@ impl OutgoingEvent {
     }
 
     pub fn files_hovered_left(tag: String, window_id: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"window_id": window_id})),
-            ..Self::tagged("files_hovered_left", tag)
-        }
+        Self::window_event("files_hovered_left", tag, window_id)
     }
 
     // -----------------------------------------------------------------------

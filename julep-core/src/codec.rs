@@ -94,8 +94,9 @@ impl Codec {
     ///
     /// For JSON: binary fields are base64-encoded as strings.
     ///
-    /// This is used for screenshot responses where pixel data must be
-    /// transmitted efficiently over msgpack while remaining valid over JSON.
+    /// Use this instead of [`encode`](Self::encode) when the message
+    /// contains raw byte data (e.g. pixel buffers) that should use
+    /// native binary encoding over msgpack.
     pub fn encode_binary_message(
         &self,
         mut map: serde_json::Map<String, serde_json::Value>,
@@ -1269,5 +1270,123 @@ mod tests {
         let result: Result<serde_json::Value, _> = Codec::MsgPack.decode(&bytes);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("elements"));
+    }
+
+    // -- json_to_rmpv ---------------------------------------------------------
+
+    #[test]
+    fn json_to_rmpv_scalars() {
+        assert_eq!(json_to_rmpv(json!(null)), rmpv::Value::Nil);
+        assert_eq!(json_to_rmpv(json!(true)), rmpv::Value::Boolean(true));
+        assert_eq!(json_to_rmpv(json!(42)), rmpv::Value::Integer(42.into()));
+        assert_eq!(json_to_rmpv(json!(2.5)), rmpv::Value::F64(2.5));
+        assert_eq!(
+            json_to_rmpv(json!("hello")),
+            rmpv::Value::String("hello".into())
+        );
+    }
+
+    #[test]
+    fn json_to_rmpv_nested() {
+        let val = json!({"key": [1, "two", null]});
+        let rmpv = json_to_rmpv(val);
+        match rmpv {
+            rmpv::Value::Map(entries) => {
+                assert_eq!(entries.len(), 1);
+                let (k, v) = &entries[0];
+                assert_eq!(k, &rmpv::Value::String("key".into()));
+                match v {
+                    rmpv::Value::Array(arr) => {
+                        assert_eq!(arr.len(), 3);
+                        assert_eq!(arr[0], rmpv::Value::Integer(1.into()));
+                        assert_eq!(arr[2], rmpv::Value::Nil);
+                    }
+                    other => panic!("expected array, got {other:?}"),
+                }
+            }
+            other => panic!("expected map, got {other:?}"),
+        }
+    }
+
+    // -- encode_binary_message ------------------------------------------------
+
+    #[test]
+    fn encode_binary_message_json_without_binary() {
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), json!("test"));
+        map.insert("id".to_string(), json!("t1"));
+
+        let bytes = Codec::Json.encode_binary_message(map, None).unwrap();
+        let s = std::str::from_utf8(&bytes).unwrap();
+        assert!(s.ends_with('\n'));
+        let parsed: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
+        assert_eq!(parsed["type"], "test");
+        assert_eq!(parsed["id"], "t1");
+        assert!(parsed.get("rgba").is_none());
+    }
+
+    #[test]
+    fn encode_binary_message_json_with_binary() {
+        use base64::Engine as _;
+
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), json!("screenshot"));
+        let pixel_data = vec![255u8, 0, 128, 64];
+
+        let bytes = Codec::Json
+            .encode_binary_message(map, Some(("rgba", &pixel_data)))
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
+        let b64 = parsed["rgba"].as_str().unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap();
+        assert_eq!(decoded, pixel_data);
+    }
+
+    #[test]
+    fn encode_binary_message_msgpack_with_binary() {
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), json!("screenshot"));
+        map.insert("id".to_string(), json!("s1"));
+        let pixel_data = vec![0xDE, 0xAD, 0xBE, 0xEF];
+
+        let bytes = Codec::MsgPack
+            .encode_binary_message(map, Some(("rgba", &pixel_data)))
+            .unwrap();
+
+        // Strip 4-byte length prefix
+        let payload = &bytes[4..];
+        let rmpv_val: rmpv::Value = rmpv::decode::read_value(&mut &payload[..]).unwrap();
+
+        // Find the rgba field -- should be native Binary, not a string
+        match rmpv_val {
+            rmpv::Value::Map(entries) => {
+                let rgba_entry = entries
+                    .iter()
+                    .find(|(k, _)| k == &rmpv::Value::String("rgba".into()));
+                match rgba_entry {
+                    Some((_, rmpv::Value::Binary(data))) => {
+                        assert_eq!(data, &pixel_data);
+                    }
+                    other => panic!("expected Binary rgba field, got {other:?}"),
+                }
+            }
+            other => panic!("expected Map, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_binary_message_msgpack_roundtrip_non_binary_fields() {
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), json!("test"));
+        map.insert("count".to_string(), json!(42));
+        map.insert("nested".to_string(), json!({"a": [1, 2]}));
+
+        let bytes = Codec::MsgPack.encode_binary_message(map, None).unwrap();
+        let decoded: serde_json::Value = Codec::MsgPack.decode(&bytes[4..]).unwrap();
+        assert_eq!(decoded["type"], "test");
+        assert_eq!(decoded["count"], 42);
+        assert_eq!(decoded["nested"]["a"][0], 1);
     }
 }
