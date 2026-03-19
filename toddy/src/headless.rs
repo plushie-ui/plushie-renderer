@@ -671,6 +671,26 @@ fn handle_message(
                         )?;
                     }
                     CoreEffect::ThemeChanged(t) => {
+                        let mode_str = if t == iced::Theme::Light {
+                            "light"
+                        } else {
+                            "dark"
+                        };
+                        // Emit theme_changed subscription event if active,
+                        // matching windowed mode behavior.
+                        if let Some(tag) = s
+                            .core
+                            .active_subscriptions
+                            .get(crate::renderer::constants::SUB_THEME_CHANGE)
+                        {
+                            let _ = s.writer.emit(
+                                &toddy_core::protocol::OutgoingEvent::theme_changed(
+                                    tag.clone(),
+                                    mode_str.to_string(),
+                                )
+                                .with_session(session_id),
+                            );
+                        }
                         s.theme = t;
                     }
                     CoreEffect::ImageOp {
