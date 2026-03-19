@@ -48,10 +48,7 @@ pub(crate) fn render_button<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     let disabled =
         prop_bool_default(props, "disabled", false) || !prop_bool_default(props, "enabled", true);
 
-    let mut b = button(child)
-        .width(width)
-        .height(height)
-        .clip(clip);
+    let mut b = button(child).width(width).height(height).clip(clip);
 
     if let Some(p) = padding {
         b = b.padding(p);

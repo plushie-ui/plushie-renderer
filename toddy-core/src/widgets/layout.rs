@@ -135,10 +135,7 @@ pub(crate) fn render_container<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
         .map(|c| ctx.render_child(c))
         .unwrap_or_else(|| Space::new().into());
 
-    let mut c = container(child)
-        .width(width)
-        .height(height)
-        .clip(clip);
+    let mut c = container(child).width(width).height(height).clip(clip);
 
     if let Some(p) = padding {
         c = c.padding(p);

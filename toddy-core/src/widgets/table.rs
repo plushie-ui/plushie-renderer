@@ -138,10 +138,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
                     if let Some(sz) = header_text_size {
                         label = label.size(sz);
                     }
-                    container(label)
-                        .width(col.width)
-                        .align_x(col.align)
-                        .into()
+                    container(label).width(col.width).align_x(col.align).into()
                 }
             })
             .collect();
@@ -186,10 +183,7 @@ pub(crate) fn render_table<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Eleme
                 if let Some(sz) = row_text_size {
                     cell = cell.size(sz);
                 }
-                container(cell)
-                    .width(col.width)
-                    .align_x(col.align)
-                    .into()
+                container(cell).width(col.width).align_x(col.align).into()
             })
             .collect();
         let mut data_row_elem = row(cells).width(Fill);
