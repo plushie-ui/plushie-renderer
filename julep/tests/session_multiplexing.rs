@@ -229,3 +229,89 @@ fn reset_tears_down_session() {
     drop(stdin);
     child.wait().unwrap();
 }
+
+#[test]
+fn headless_interact_step_round_trip() {
+    let mut child = Command::new(julep_binary())
+        .args(["--headless", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn julep");
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    // Bootstrap: settings + hello.
+    send(
+        &mut stdin,
+        &serde_json::json!({"session": "s1", "type": "settings", "settings": {}}),
+    );
+    let _hello = recv(&mut stdout);
+
+    // Send a tree with a button.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "snapshot",
+            "tree": {
+                "id": "root", "type": "column", "props": {}, "children": [
+                    {"id": "btn1", "type": "button", "props": {"label": "Click me"}, "children": []}
+                ]
+            }
+        }),
+    );
+
+    // Click the button. In headless mode, this injects CursorMoved +
+    // ButtonPressed + ButtonReleased. The ButtonReleased should
+    // produce a Click message, emitted as an interact_step.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "interact",
+            "id": "i1",
+            "action": "click",
+            "selector": {"by": "id", "value": "btn1"},
+            "payload": {}
+        }),
+    );
+
+    // We should receive an interact_step with the click event.
+    let step = recv(&mut stdout);
+    assert_eq!(step["type"], "interact_step");
+    assert_eq!(step["session"], "s1");
+    assert_eq!(step["id"], "i1");
+    assert!(step["events"].is_array());
+    let events = step["events"].as_array().unwrap();
+    assert!(!events.is_empty(), "interact_step should have events");
+    assert_eq!(events[0]["family"], "click");
+    assert_eq!(events[0]["id"], "btn1");
+
+    // Send the snapshot back (the renderer is blocked waiting for it).
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "session": "s1",
+            "type": "snapshot",
+            "tree": {
+                "id": "root", "type": "column", "props": {}, "children": [
+                    {"id": "btn1", "type": "button", "props": {"label": "Clicked!"}, "children": []}
+                ]
+            }
+        }),
+    );
+
+    // The final interact_response should arrive with empty events
+    // (the click was already delivered via the step).
+    let resp = recv(&mut stdout);
+    assert_eq!(resp["type"], "interact_response");
+    assert_eq!(resp["session"], "s1");
+    assert_eq!(resp["id"], "i1");
+    assert!(resp["events"].as_array().unwrap().is_empty());
+
+    drop(stdin);
+    child.wait().unwrap();
+}
