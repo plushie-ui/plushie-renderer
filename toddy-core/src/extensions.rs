@@ -146,6 +146,20 @@ pub(crate) fn catch_unwind_enabled() -> bool {
 /// `render()` panics are caught by the widget dispatch layer. Three
 /// consecutive render panics trigger automatic poisoning.
 ///
+/// # Accessibility
+///
+/// Extension widgets automatically get `A11yOverride` wrapping from the
+/// renderer's a11y layer, so hosts can set a11y props (role, label, etc.)
+/// on extension nodes the same way as built-in widgets. However:
+///
+/// - **Auto-inference does not apply** to extension types. The host must
+///   set explicit `a11y` props for accessible labels and descriptions.
+/// - **Focus cycling (Tab)** only visits widgets that implement the
+///   `focusable` operation. If your extension renders focusable widgets
+///   (e.g. text inputs), they participate automatically. If it renders
+///   custom interactive content without iced's built-in focusable
+///   widgets, Tab navigation will skip it.
+///
 /// # Examples
 ///
 /// A minimal render-only extension that displays a greeting:

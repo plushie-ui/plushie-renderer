@@ -107,6 +107,17 @@ pub(crate) fn render_text<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element
 // Rich Text
 // ---------------------------------------------------------------------------
 
+/// Render a rich_text widget with per-span styling.
+///
+/// # Accessibility limitations
+///
+/// Rich text renders as multiple spans within a single iced `rich_text`
+/// widget. The accessibility tree sees individual text fragments but has
+/// no summary label for the composite. Hosts that need an accessible
+/// name for the rich_text as a whole should set `a11y.label` on the
+/// node. Link spans are rendered with iced's native link support, which
+/// provides basic AT announcements but does not expose a separate
+/// focusable link role per span.
 pub(crate) fn render_rich_text<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let width = prop_length(props, "width", Length::Shrink);

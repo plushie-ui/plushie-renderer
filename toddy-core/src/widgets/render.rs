@@ -161,6 +161,11 @@ pub fn render<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message
     };
 
     // Explicit a11y overrides take precedence.
+    //
+    // NOTE: Auto-inference only applies to built-in widget types listed
+    // below. Extension widgets do NOT get auto-inferred a11y overrides.
+    // Extension authors must set explicit a11y props on their nodes for
+    // accessible labels, descriptions, and roles.
     let overrides = crate::widgets::a11y::A11yOverrides::from_props(&node.props).or_else(|| {
         // Auto-infer accessibility overrides from widget-specific props
         // when the host hasn't set an explicit a11y block.

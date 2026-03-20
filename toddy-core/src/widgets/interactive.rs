@@ -243,6 +243,18 @@ pub(crate) fn render_sensor<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
 // Tooltip
 // ---------------------------------------------------------------------------
 
+/// Render a tooltip widget that shows a popup hint on hover/focus.
+///
+/// # Accessibility
+///
+/// The tooltip `tip` text is rendered visually on hover but is not
+/// automatically exposed as the child widget's accessible description.
+/// For AT users to hear the tooltip content, the host should wire the
+/// tooltip text into the child's `a11y.description` prop, or use
+/// `a11y.described_by` to point to a separate text node containing the
+/// same content. iced's tooltip widget itself does not currently emit
+/// an accessible `Tooltip` role -- the visual popup appears/disappears
+/// without AT notification.
 pub(crate) fn render_tooltip<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let tip = prop_str(props, "tip").unwrap_or_default();

@@ -566,6 +566,16 @@ pub(crate) fn render_scrollable<'a>(
 // PaneGrid
 // ---------------------------------------------------------------------------
 
+/// Render a pane_grid widget with resizable split panes.
+///
+/// # Accessibility
+///
+/// The pane_grid renders as nested containers with no inherent semantic
+/// structure. For screen reader users, each pane's content should be
+/// independently labelable. Hosts should set `a11y.label` on each pane
+/// node to give it a meaningful name (e.g. "Editor", "Preview"). The
+/// pane_grid node itself can use `a11y.role = "group"` with
+/// `a11y.label` to describe the overall layout (e.g. "Split editor").
 pub(crate) fn render_pane_grid<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let spacing = prop_f32(props, "spacing").unwrap_or(2.0);

@@ -71,6 +71,16 @@ pub(crate) struct A11yOverrides {
     /// Another widget that provides this widget's description.
     pub described_by: Option<widget::Id>,
     /// A widget that describes why the value is invalid.
+    ///
+    /// To wire up error state for form fields, the host should:
+    /// 1. Set `a11y.invalid = true` on the input widget when validation fails
+    /// 2. Render an error message as a separate text node with a stable ID
+    /// 3. Set `a11y.error_message = "<error-text-node-id>"` on the input
+    ///
+    /// This causes AT to announce the error text when the user focuses the
+    /// invalid field. The `invalid` and `error_message` fields work
+    /// together: `invalid` marks the field's state, `error_message`
+    /// provides the explanation.
     pub error_message: Option<widget::Id>,
 }
 
@@ -277,6 +287,11 @@ impl A11yOverrides {
 ///
 /// Covers all variants of the iced `Role` enum using lowercase string
 /// matching. Returns `None` for unrecognised strings.
+///
+/// **Maintenance note:** When new variants are added to iced's
+/// `accessible::Role` enum (in the toddy-iced fork), they must be
+/// manually added here with appropriate string aliases. There is no
+/// compile-time exhaustiveness check since this maps from strings.
 fn parse_role(s: &str) -> Option<accessible::Role> {
     let role = match s {
         "alert" => accessible::Role::Alert,
