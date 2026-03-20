@@ -128,6 +128,24 @@ pub(crate) fn catch_unwind_enabled() -> bool {
 /// - `prop_content_fit(node) -> Option<ContentFit>`
 /// - `value_to_length(val) -> Option<Length>` (lower-level conversion)
 ///
+/// # Panic safety
+///
+/// All mutable trait methods (`init`, `prepare`, `handle_event`,
+/// `handle_command`, `cleanup`) are wrapped in `catch_unwind`. If your
+/// extension panics, the renderer logs the error, poisons the extension
+/// (disabling further calls), and renders a red placeholder in its place.
+///
+/// Because `catch_unwind` uses `AssertUnwindSafe`, the compiler's unwind
+/// safety checks are bypassed. This means your `&mut self` state could be
+/// observed in a partially-mutated state if a panic interrupts a
+/// multi-step mutation. The poisoning mechanism prevents further calls, but
+/// if your extension shares state across nodes via `ExtensionCaches`, keep
+/// each mutation atomic -- don't leave cache entries in an intermediate
+/// state where a panic between two writes would be visible to other nodes.
+///
+/// `render()` panics are caught by the widget dispatch layer. Three
+/// consecutive render panics trigger automatic poisoning.
+///
 /// # Examples
 ///
 /// A minimal render-only extension that displays a greeting:
