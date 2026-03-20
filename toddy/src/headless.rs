@@ -73,7 +73,7 @@ enum WriterInner {
     /// Write directly to stdout (single-session mode).
     Stdout,
     /// Send encoded bytes to the writer thread (multiplexed mode).
-    Channel(mpsc::Sender<Vec<u8>>),
+    Channel(mpsc::SyncSender<Vec<u8>>),
 }
 
 impl WireWriter {
@@ -83,7 +83,7 @@ impl WireWriter {
         }
     }
 
-    fn channel(tx: mpsc::Sender<Vec<u8>>) -> Self {
+    fn channel(tx: mpsc::SyncSender<Vec<u8>>) -> Self {
         Self {
             inner: WriterInner::Channel(tx),
         }
@@ -1005,7 +1005,9 @@ fn run_multiplexed(
     use std::collections::HashMap;
 
     // Writer thread: drains the channel and writes to stdout.
-    let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>();
+    // Bounded channel (256) since this is the aggregation point for all
+    // sessions; back-pressure blocks session threads when stdout is slow.
+    let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(256);
     let writer_handle = thread::spawn(move || {
         let stdout = io::stdout();
         let mut handle = stdout.lock();
@@ -1017,7 +1019,7 @@ fn run_multiplexed(
     });
 
     // Session dispatch table: session_id -> sender to that session's thread.
-    let mut sessions: HashMap<String, mpsc::Sender<IncomingMessage>> = HashMap::new();
+    let mut sessions: HashMap<String, mpsc::SyncSender<IncomingMessage>> = HashMap::new();
     let mut session_handles: Vec<thread::JoinHandle<()>> = Vec::new();
 
     loop {
@@ -1056,7 +1058,9 @@ fn run_multiplexed(
                         continue;
                     }
 
-                    let (tx, rx) = mpsc::channel::<IncomingMessage>();
+                    // Bounded channel (32) provides natural back-pressure
+                    // from the reader to slow sessions.
+                    let (tx, rx) = mpsc::sync_channel::<IncomingMessage>(32);
                     let dispatcher = template.clone_for_session();
                     let writer = WireWriter::channel(writer_tx.clone());
                     let sid = session_id.clone();
