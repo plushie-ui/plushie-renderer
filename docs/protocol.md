@@ -228,12 +228,14 @@ All fields inside `settings` are optional.
 | `scale_factor` | number | 1.0 | Global scale factor (startup only) |
 | `validate_props` | bool | false | Enable prop validation warnings in release builds |
 | `extension_config` | object | {} | Configuration passed to widget extensions |
+| `default_event_rate` | number | -- | Default max events per second for all coalescable events. Omit for unlimited. |
 
 **Startup-only fields** (ignored if sent after the first Settings):
 `antialiasing`, `vsync`, `fonts`, `scale_factor`, `validate_props`.
 
 **Runtime fields** (can be updated by sending Settings again):
-`default_text_size`, `default_font`, `extension_config`.
+`default_text_size`, `default_font`, `extension_config`,
+`default_event_rate`.
 
 **Log level.** Renderer log verbosity is controlled via the `RUST_LOG`
 environment variable on the renderer process, not via a Settings field.
@@ -361,6 +363,18 @@ this kind so the host can route them.
   "tag": "my_key_handler"
 }
 ```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | string | Yes | Event category to subscribe to (see table below) |
+| `tag` | string | Yes | Tag included in events of this kind for routing |
+| `max_rate` | integer | No | Maximum events per second. Omit for unlimited. Zero means "subscribe but never emit." |
+
+When `max_rate` is set, the renderer delivers at most that many events
+per second for this subscription kind. Between deliveries, it coalesces
+buffered events (latest value wins, or delta accumulation for scroll
+events). Re-subscribing with a different `max_rate` updates the limit
+in place.
 
 **Available subscription kinds:**
 
@@ -1649,6 +1663,77 @@ break at the panic site.
 **Use this only during development.** In production, `catch_unwind`
 prevents one misbehaving extension from crashing the entire renderer.
 With the env var set, any extension panic takes down the process.
+
+---
+
+## Event throttling
+
+The renderer supports host-controlled rate limiting of high-frequency
+events. Without configuration, all events are delivered at full speed
+(backward compatible). The host opts in by setting rates at one or
+more levels.
+
+### Rate hierarchy
+
+For a given event, the effective rate is determined by (highest
+priority first):
+
+1. Per-widget `event_rate` prop
+2. Per-subscription `max_rate` field on Subscribe
+3. Global `default_event_rate` from Settings
+4. No limit (full speed) if none of the above are set
+
+### Coalescable events
+
+Only high-frequency events are eligible for rate limiting. The
+renderer classifies events into two coalescing strategies:
+
+**Replace (latest value wins):** `cursor_moved`, `finger_moved`,
+`modifiers_changed`, `animation_frame`, `theme_changed`, `slide`,
+`mouse_area_move`, `canvas_move`, `sensor_resize`, `pane_resized`.
+
+**Accumulate (deltas sum):** `wheel_scrolled`, `mouse_area_scroll`,
+`canvas_scroll`.
+
+**Never coalesced:** `click`, `input`, `submit`, `toggle`, `select`,
+`paste`, `key_press`, `key_release`, `button_pressed`,
+`button_released`, `cursor_entered`, `cursor_left`, `slide_release`,
+and all window lifecycle events. These are always delivered
+immediately regardless of rate settings.
+
+### Widget `event_rate` prop
+
+Any widget node can include an `event_rate` prop (integer, events per
+second) to rate-limit its coalescable events:
+
+```json
+{
+  "id": "volume",
+  "type": "slider",
+  "props": { "range": [0, 100], "value": 50, "event_rate": 30 }
+}
+```
+
+Different widgets of the same type can have different rates. The prop
+is accepted on all widget types (it is a universal prop like `a11y`).
+
+### Ordering guarantees
+
+Non-coalescable events flush the coalesce buffer before emitting.
+This preserves ordering: the host always sees the latest coalesced
+state (e.g. mouse position) before the discrete event (e.g. click)
+that follows.
+
+Incoming stdin messages also flush the buffer, providing adaptive
+throughput matching -- when the host sends a message, it gets all
+pending coalesced events immediately.
+
+### Headless and mock modes
+
+Rate limiting configuration is accepted and stored but not applied
+in headless or mock modes. Events in those modes are driven by the
+scripting protocol at the host's pace, so rate limits would make
+test timing unpredictable.
 
 ---
 
