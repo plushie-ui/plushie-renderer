@@ -57,6 +57,24 @@ pub fn node_with_children(id: &str, type_name: &str, children: Vec<TreeNode>) ->
     }
 }
 
+/// Create a [`TreeNode`] with both props and children.
+///
+/// For container-type extension widgets that need both configuration
+/// (via props) and nested content (via children).
+pub fn node_with_props_and_children(
+    id: &str,
+    type_name: &str,
+    props: Value,
+    children: Vec<TreeNode>,
+) -> TreeNode {
+    TreeNode {
+        id: id.to_string(),
+        type_name: type_name.to_string(),
+        props,
+        children,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TestEnv: owns all render dependencies
 // ---------------------------------------------------------------------------

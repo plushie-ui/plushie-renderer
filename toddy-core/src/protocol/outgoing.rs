@@ -63,6 +63,22 @@ impl OutgoingEvent {
         self.session = session.into();
         self
     }
+
+    /// Set the primary `value` field on this event.
+    ///
+    /// For built-in widget events, `value` carries the widget's primary
+    /// datum (input text, slider position, selected option). Extension
+    /// authors wrapping built-in widgets can use this to emit events
+    /// compatible with the built-in shape:
+    ///
+    /// ```ignore
+    /// OutgoingEvent::extension_event("input", id, data)
+    ///     .with_value(serde_json::Value::String(text))
+    /// ```
+    pub fn with_value(mut self, value: Value) -> Self {
+        self.value = Some(value);
+        self
+    }
 }
 
 /// Serializable representation of keyboard modifiers.

@@ -38,6 +38,43 @@ pub struct TreeNode {
     pub children: Vec<TreeNode>,
 }
 
+impl TreeNode {
+    /// Access props as a JSON map, or `None` if props is not an object.
+    ///
+    /// This is the same type expected by all `prop_*` helper functions.
+    /// Using this method avoids the `node.props.as_object()` boilerplate
+    /// in every `render()` and `prepare()` implementation.
+    pub fn props(&self) -> crate::prop_helpers::Props<'_> {
+        self.props.as_object()
+    }
+
+    /// Get a string prop by key. Shorthand for `prop_str(node.props(), key)`.
+    pub fn prop_str(&self, key: &str) -> Option<String> {
+        crate::prop_helpers::prop_str(self.props(), key)
+    }
+
+    /// Get an f32 prop by key. Shorthand for `prop_f32(node.props(), key)`.
+    pub fn prop_f32(&self, key: &str) -> Option<f32> {
+        crate::prop_helpers::prop_f32(self.props(), key)
+    }
+
+    /// Get a bool prop by key. Shorthand for `prop_bool(node.props(), key)`.
+    pub fn prop_bool(&self, key: &str) -> Option<bool> {
+        crate::prop_helpers::prop_bool(self.props(), key)
+    }
+
+    /// Get a color prop by key. Shorthand for `prop_color(node.props(), key)`.
+    pub fn prop_color(&self, key: &str) -> Option<iced::Color> {
+        crate::prop_helpers::prop_color(self.props(), key)
+    }
+
+    /// Get the padding from the standard `"padding"` prop.
+    /// Shorthand for `prop_padding(node.props())`.
+    pub fn prop_padding(&self) -> Option<iced::Padding> {
+        crate::prop_helpers::prop_padding(self.props())
+    }
+}
+
 /// A single patch operation applied incrementally to the retained tree.
 ///
 /// The `op` field discriminates the operation type. The `path` field

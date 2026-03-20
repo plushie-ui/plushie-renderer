@@ -41,6 +41,15 @@ impl ToddyAppBuilder {
         self
     }
 
+    /// Register a pre-boxed widget extension.
+    ///
+    /// Useful for dynamically loaded extensions (e.g. via `libloading`)
+    /// where the concrete type is erased at the plugin boundary.
+    pub fn extension_boxed(mut self, ext: Box<dyn WidgetExtension>) -> Self {
+        self.extensions.push(ext);
+        self
+    }
+
     /// Consume the builder and produce an [`ExtensionDispatcher`].
     pub fn build_dispatcher(self) -> ExtensionDispatcher {
         ExtensionDispatcher::new(self.extensions)

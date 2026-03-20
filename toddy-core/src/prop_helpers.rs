@@ -439,6 +439,19 @@ pub fn prop_value<'a>(props: Props<'a>, key: &str) -> Option<&'a Value> {
     props?.get(key)
 }
 
+/// Parse padding from a `"padding"` prop.
+///
+/// Supports three formats:
+/// - `"padding": 10` -- uniform padding (all four sides)
+/// - `"padding": {"top": 10, "right": 5, "bottom": 10, "left": 5}` -- per-side
+/// - Individual `"padding_top"`, `"padding_right"`, etc. keys (legacy)
+///
+/// Returns `None` if no padding props are present, preserving iced defaults.
+/// Negative values are clamped to `0.0` in the object and uniform formats.
+pub fn prop_padding(props: Props<'_>) -> Option<iced::Padding> {
+    crate::widgets::parse_padding_value(props)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
