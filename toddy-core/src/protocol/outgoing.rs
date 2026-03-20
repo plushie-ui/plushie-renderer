@@ -289,10 +289,7 @@ impl OutgoingEvent {
     // -----------------------------------------------------------------------
 
     pub fn ime_opened(tag: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"kind": "opened"})),
-            ..Self::tagged("ime", tag)
-        }
+        Self::tagged("ime_opened", tag)
     }
 
     pub fn ime_preedit(tag: String, text: String, cursor: Option<std::ops::Range<usize>>) -> Self {
@@ -300,23 +297,20 @@ impl OutgoingEvent {
             .map(|r| serde_json::json!({"start": r.start, "end": r.end}))
             .unwrap_or(serde_json::Value::Null);
         Self {
-            data: Some(serde_json::json!({"kind": "preedit", "text": text, "cursor": cursor_val})),
-            ..Self::tagged("ime", tag)
+            data: Some(serde_json::json!({"text": text, "cursor": cursor_val})),
+            ..Self::tagged("ime_preedit", tag)
         }
     }
 
     pub fn ime_commit(tag: String, text: String) -> Self {
         Self {
-            data: Some(serde_json::json!({"kind": "commit", "text": text})),
-            ..Self::tagged("ime", tag)
+            data: Some(serde_json::json!({"text": text})),
+            ..Self::tagged("ime_commit", tag)
         }
     }
 
     pub fn ime_closed(tag: String) -> Self {
-        Self {
-            data: Some(serde_json::json!({"kind": "closed"})),
-            ..Self::tagged("ime", tag)
-        }
+        Self::tagged("ime_closed", tag)
     }
 
     // -----------------------------------------------------------------------
@@ -1532,9 +1526,9 @@ mod tests {
         let evt = OutgoingEvent::ime_opened("ime_tag".to_string());
         let json = serde_json::to_value(&evt).unwrap();
         assert_eq!(json["type"], "event");
-        assert_eq!(json["family"], "ime");
+        assert_eq!(json["family"], "ime_opened");
         assert_eq!(json["tag"], "ime_tag");
-        assert_eq!(json["data"]["kind"], "opened");
+        assert!(json.get("data").is_none());
     }
 
     #[test]
@@ -1542,8 +1536,7 @@ mod tests {
         let evt =
             OutgoingEvent::ime_preedit("ime_tag".to_string(), "hello".to_string(), Some(2..5));
         let json = serde_json::to_value(&evt).unwrap();
-        assert_eq!(json["family"], "ime");
-        assert_eq!(json["data"]["kind"], "preedit");
+        assert_eq!(json["family"], "ime_preedit");
         assert_eq!(json["data"]["text"], "hello");
         assert_eq!(json["data"]["cursor"]["start"], 2);
         assert_eq!(json["data"]["cursor"]["end"], 5);
@@ -1553,7 +1546,7 @@ mod tests {
     fn ime_preedit_event_without_cursor() {
         let evt = OutgoingEvent::ime_preedit("ime_tag".to_string(), "hi".to_string(), None);
         let json = serde_json::to_value(&evt).unwrap();
-        assert_eq!(json["data"]["kind"], "preedit");
+        assert_eq!(json["family"], "ime_preedit");
         assert_eq!(json["data"]["text"], "hi");
         assert!(json["data"]["cursor"].is_null());
     }
@@ -1562,8 +1555,7 @@ mod tests {
     fn ime_commit_event() {
         let evt = OutgoingEvent::ime_commit("ime_tag".to_string(), "final".to_string());
         let json = serde_json::to_value(&evt).unwrap();
-        assert_eq!(json["family"], "ime");
-        assert_eq!(json["data"]["kind"], "commit");
+        assert_eq!(json["family"], "ime_commit");
         assert_eq!(json["data"]["text"], "final");
     }
 
@@ -1571,8 +1563,8 @@ mod tests {
     fn ime_closed_event() {
         let evt = OutgoingEvent::ime_closed("ime_tag".to_string());
         let json = serde_json::to_value(&evt).unwrap();
-        assert_eq!(json["family"], "ime");
-        assert_eq!(json["data"]["kind"], "closed");
+        assert_eq!(json["family"], "ime_closed");
+        assert!(json.get("data").is_none());
     }
 
     #[test]
