@@ -401,9 +401,7 @@ impl Session {
                     }
                 } else {
                     // stdin closed or channel dropped mid-interact.
-                    log::warn!(
-                        "stdin closed mid-interact, stopping event injection"
-                    );
+                    log::warn!("stdin closed mid-interact, stopping event injection");
                     break;
                 }
             }
@@ -1099,9 +1097,7 @@ fn run_multiplexed(
                             let msg = payload
                                 .downcast_ref::<&str>()
                                 .copied()
-                                .or_else(|| {
-                                    payload.downcast_ref::<String>().map(|s| s.as_str())
-                                })
+                                .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
                                 .unwrap_or("(non-string panic)");
                             log::error!("session '{sid}' thread panicked: {msg}");
                             // Emit a synthetic error event so the host knows
@@ -1133,6 +1129,9 @@ fn run_multiplexed(
                 }
 
                 // If this was a Reset, tear down the session after it processes.
+                // The host must wait for reset_response before sending new
+                // messages to this session ID -- otherwise stale responses
+                // from the old session thread may interleave with the new one.
                 if is_reset {
                     // Drop the sender so the session thread exits after
                     // processing the Reset message.

@@ -849,6 +849,13 @@ ID can be reused.
 
 Response: `reset_response`.
 
+**Multiplexed mode ordering constraint.** In multiplexed mode, the host
+must wait for the `reset_response` before sending new messages to a
+recycled session ID. Without this, the host may receive stale responses
+from the old session interleaved with responses from the new one, because
+the old session thread may still be draining its channel when the reader
+thread creates a replacement.
+
 ### AdvanceFrame
 
 Advance the animation clock by one frame. If `on_animation_frame`

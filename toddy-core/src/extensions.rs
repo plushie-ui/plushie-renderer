@@ -667,7 +667,8 @@ impl ExtensionDispatcher {
     /// overridden). The caller should log the error and reject the
     /// session rather than crashing the reader thread.
     pub fn clone_for_session(&self) -> Result<Self, String> {
-        let mut extensions: Vec<Box<dyn WidgetExtension>> = Vec::with_capacity(self.extensions.len());
+        let mut extensions: Vec<Box<dyn WidgetExtension>> =
+            Vec::with_capacity(self.extensions.len());
         for ext in &self.extensions {
             let key = ext.config_key().to_string();
             if catch_unwind_enabled() {
@@ -1893,7 +1894,9 @@ mod tests {
     fn clone_for_session_uses_new_instance() {
         let ext = CloneableExtension::new("session");
         let dispatcher = ExtensionDispatcher::new(vec![Box::new(ext)]);
-        let cloned = dispatcher.clone_for_session().expect("clone should succeed");
+        let cloned = dispatcher
+            .clone_for_session()
+            .expect("clone should succeed");
         assert!(cloned.handles_type("cloneable_widget"));
         assert_eq!(cloned.len(), 1);
     }
@@ -1905,6 +1908,9 @@ mod tests {
         let result = dispatcher.clone_for_session();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("charts"), "error should name the extension: {err}");
+        assert!(
+            err.contains("charts"),
+            "error should name the extension: {err}"
+        );
     }
 }
