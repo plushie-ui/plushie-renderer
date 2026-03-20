@@ -1241,4 +1241,37 @@ mod tests {
         // Empty IDs should not be flagged as duplicates
         assert!(tree.snapshot(root).is_ok());
     }
+
+    #[test]
+    fn find_window_returns_none_beyond_max_depth() {
+        // Build a chain deeper than MAX_TREE_DEPTH (256).
+        let mut deepest = node("deep_win", "window");
+        for i in 0..MAX_TREE_DEPTH + 10 {
+            deepest = node_with_children(&format!("n{i}"), "column", vec![deepest]);
+        }
+        let mut tree = Tree::new();
+        let _ = tree.snapshot(deepest);
+
+        // The window at depth > 256 should not be found.
+        assert!(
+            tree.find_window("deep_win").is_none(),
+            "window beyond MAX_TREE_DEPTH should not be reachable"
+        );
+    }
+
+    #[test]
+    fn window_ids_skips_windows_beyond_max_depth() {
+        let mut deepest = node("deep_win", "window");
+        for i in 0..MAX_TREE_DEPTH + 10 {
+            deepest = node_with_children(&format!("n{i}"), "column", vec![deepest]);
+        }
+        let mut tree = Tree::new();
+        let _ = tree.snapshot(deepest);
+
+        let ids = tree.window_ids();
+        assert!(
+            !ids.contains(&"deep_win".to_string()),
+            "window beyond MAX_TREE_DEPTH should not appear in window_ids"
+        );
+    }
 }
