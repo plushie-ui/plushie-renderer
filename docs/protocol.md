@@ -1428,7 +1428,11 @@ accessibility behaviour. All fields are optional.
     "orientation": "horizontal",
     "labelled_by": "label-node-id",
     "described_by": "desc-node-id",
-    "error_message": "error-node-id"
+    "error_message": "error-node-id",
+    "disabled": false,
+    "position_in_set": 3,
+    "size_of_set": 10,
+    "has_popup": "menu"
   }
 }
 ```
@@ -1455,6 +1459,10 @@ accessibility behaviour. All fields are optional.
 | `labelled_by` | string | Node ID of the labelling element |
 | `described_by` | string | Node ID of the describing element |
 | `error_message` | string | Node ID of the error message element |
+| `disabled` | bool | Widget is disabled (not interactive) |
+| `position_in_set` | number | Position in set (1-based, for list items, radios, tabs) |
+| `size_of_set` | number | Total items in set (paired with `position_in_set`) |
+| `has_popup` | string | Popup type: `"listbox"`, `"menu"`, `"dialog"`, `"tree"`, `"grid"` |
 
 **Auto-inference:** Image and SVG widgets with an `alt` prop auto-populate
 `label` from the alt text. Text input and text editor widgets auto-populate

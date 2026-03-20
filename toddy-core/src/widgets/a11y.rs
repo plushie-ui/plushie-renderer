@@ -82,6 +82,27 @@ pub(crate) struct A11yOverrides {
     /// together: `invalid` marks the field's state, `error_message`
     /// provides the explanation.
     pub error_message: Option<widget::Id>,
+    /// Whether the widget is disabled (not interactive).
+    ///
+    /// Overrides the widget-native disabled state when `Some`. Unlike
+    /// bool-OR fields (required, busy), this replaces the base value
+    /// so the host can explicitly enable or disable a widget.
+    pub disabled: Option<bool>,
+    /// Position of this item in a set (1-based).
+    ///
+    /// Used for list items, radio buttons, tabs, and similar ordered
+    /// collections so assistive technology can announce "item 3 of 5".
+    pub position_in_set: Option<usize>,
+    /// Total number of items in the set containing this item.
+    ///
+    /// Paired with `position_in_set` to give AT full context about
+    /// the item's position within its group.
+    pub size_of_set: Option<usize>,
+    /// The type of popup this widget triggers when activated.
+    ///
+    /// Tells AT what kind of popup to expect (listbox, menu, dialog,
+    /// tree, or grid) so it can adjust navigation accordingly.
+    pub has_popup: Option<accessible::HasPopup>,
 }
 
 impl A11yOverrides {
@@ -171,6 +192,23 @@ impl A11yOverrides {
             .and_then(|v| v.as_str())
             .map(|s| widget::Id::from(s.to_owned()));
 
+        let disabled = a11y.get("disabled").and_then(|v| v.as_bool());
+
+        let position_in_set = a11y
+            .get("position_in_set")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+
+        let size_of_set = a11y
+            .get("size_of_set")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+
+        let has_popup = a11y
+            .get("has_popup")
+            .and_then(|v| v.as_str())
+            .and_then(parse_has_popup);
+
         let result = Self {
             role,
             label,
@@ -192,6 +230,10 @@ impl A11yOverrides {
             labelled_by,
             described_by,
             error_message,
+            disabled,
+            position_in_set,
+            size_of_set,
+            has_popup,
         };
 
         // Only wrap when there's something to do.
@@ -226,6 +268,10 @@ impl A11yOverrides {
             || self.labelled_by.is_some()
             || self.described_by.is_some()
             || self.error_message.is_some()
+            || self.disabled.is_some()
+            || self.position_in_set.is_some()
+            || self.size_of_set.is_some()
+            || self.has_popup.is_some()
     }
 
     /// Merge these overrides into a base [`Accessible`], returning a
@@ -256,11 +302,13 @@ impl A11yOverrides {
             labelled_by: self.labelled_by.as_ref().or(base.labelled_by),
             described_by: self.described_by.as_ref().or(base.described_by),
             error_message: self.error_message.as_ref().or(base.error_message),
-            // Preserve widget-internal fields we don't override
-            // (disabled, position_in_set, etc.). `hidden` is also
-            // intentionally omitted -- it's handled at the interception
-            // layer (subtree suppression) rather than as a property
-            // merge. See the operate() and traverse() methods.
+            disabled: self.disabled.unwrap_or(base.disabled),
+            position_in_set: self.position_in_set.or(base.position_in_set),
+            size_of_set: self.size_of_set.or(base.size_of_set),
+            has_popup: self.has_popup.or(base.has_popup),
+            // `hidden` is intentionally omitted -- it's handled at the
+            // interception layer (subtree suppression) rather than as a
+            // property merge. See the operate() and traverse() methods.
             ..base.clone()
         }
     }
@@ -358,6 +406,18 @@ fn parse_orientation(s: &str) -> Option<accessible::Orientation> {
     match s {
         "horizontal" => Some(accessible::Orientation::Horizontal),
         "vertical" => Some(accessible::Orientation::Vertical),
+        _ => None,
+    }
+}
+
+/// Parse a has-popup type string into [`accessible::HasPopup`].
+fn parse_has_popup(s: &str) -> Option<accessible::HasPopup> {
+    match s {
+        "listbox" => Some(accessible::HasPopup::Listbox),
+        "menu" => Some(accessible::HasPopup::Menu),
+        "dialog" => Some(accessible::HasPopup::Dialog),
+        "tree" => Some(accessible::HasPopup::Tree),
+        "grid" => Some(accessible::HasPopup::Grid),
         _ => None,
     }
 }
@@ -644,6 +704,7 @@ impl widget::Operation for A11yInterceptor<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::advanced::widget::Operation;
     use serde_json::json;
 
     // -- from_props -----------------------------------------------------------
@@ -707,7 +768,11 @@ mod tests {
                 "orientation": "vertical",
                 "labelled_by": "label-id",
                 "described_by": "desc-id",
-                "error_message": "err-id"
+                "error_message": "err-id",
+                "disabled": true,
+                "position_in_set": 3,
+                "size_of_set": 10,
+                "has_popup": "menu"
             }
         });
         let o = A11yOverrides::from_props(&props).unwrap();
@@ -731,6 +796,10 @@ mod tests {
         assert!(o.labelled_by.is_some());
         assert!(o.described_by.is_some());
         assert!(o.error_message.is_some());
+        assert_eq!(o.disabled, Some(true));
+        assert_eq!(o.position_in_set, Some(3));
+        assert_eq!(o.size_of_set, Some(10));
+        assert_eq!(o.has_popup, Some(accessible::HasPopup::Menu));
     }
 
     // -- parse helpers --------------------------------------------------------
@@ -970,5 +1039,417 @@ mod tests {
         assert!(overrides.label.is_none());
         assert!(overrides.role.is_none());
         assert!(!overrides.hidden);
+    }
+
+    // -- new fields: disabled, position_in_set, size_of_set, has_popup --------
+
+    #[test]
+    fn from_props_parses_disabled() {
+        let o = A11yOverrides::from_props(&json!({"a11y": {"disabled": true}})).unwrap();
+        assert_eq!(o.disabled, Some(true));
+    }
+
+    #[test]
+    fn from_props_parses_disabled_false() {
+        let o = A11yOverrides::from_props(&json!({"a11y": {"disabled": false}})).unwrap();
+        assert_eq!(o.disabled, Some(false));
+    }
+
+    #[test]
+    fn from_props_parses_position_in_set() {
+        let o = A11yOverrides::from_props(&json!({"a11y": {"position_in_set": 3}})).unwrap();
+        assert_eq!(o.position_in_set, Some(3));
+    }
+
+    #[test]
+    fn from_props_parses_size_of_set() {
+        let o = A11yOverrides::from_props(&json!({"a11y": {"size_of_set": 10}})).unwrap();
+        assert_eq!(o.size_of_set, Some(10));
+    }
+
+    #[test]
+    fn from_props_parses_has_popup() {
+        let cases = [
+            ("listbox", accessible::HasPopup::Listbox),
+            ("menu", accessible::HasPopup::Menu),
+            ("dialog", accessible::HasPopup::Dialog),
+            ("tree", accessible::HasPopup::Tree),
+            ("grid", accessible::HasPopup::Grid),
+        ];
+        for (input, expected) in cases {
+            let o = A11yOverrides::from_props(&json!({"a11y": {"has_popup": input}})).unwrap();
+            assert_eq!(o.has_popup, Some(expected), "has_popup({input:?})");
+        }
+    }
+
+    #[test]
+    fn parse_has_popup_unknown_returns_none() {
+        assert!(parse_has_popup("tooltip").is_none());
+        assert!(parse_has_popup("").is_none());
+    }
+
+    #[test]
+    fn has_overrides_true_for_new_fields() {
+        let cases: Vec<A11yOverrides> = vec![
+            A11yOverrides {
+                disabled: Some(true),
+                ..Default::default()
+            },
+            A11yOverrides {
+                position_in_set: Some(1),
+                ..Default::default()
+            },
+            A11yOverrides {
+                size_of_set: Some(5),
+                ..Default::default()
+            },
+            A11yOverrides {
+                has_popup: Some(accessible::HasPopup::Dialog),
+                ..Default::default()
+            },
+        ];
+        for (i, o) in cases.iter().enumerate() {
+            assert!(
+                o.has_overrides(),
+                "new field case {i} should have overrides"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_to_disabled_override_replaces_base() {
+        let overrides = A11yOverrides {
+            disabled: Some(true),
+            ..Default::default()
+        };
+        let base = Accessible {
+            disabled: false,
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert!(merged.disabled);
+    }
+
+    #[test]
+    fn apply_to_disabled_none_preserves_base() {
+        let overrides = A11yOverrides::default();
+        let base = Accessible {
+            disabled: true,
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert!(merged.disabled);
+    }
+
+    #[test]
+    fn apply_to_disabled_can_enable() {
+        let overrides = A11yOverrides {
+            disabled: Some(false),
+            ..Default::default()
+        };
+        let base = Accessible {
+            disabled: true,
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert!(!merged.disabled);
+    }
+
+    #[test]
+    fn apply_to_position_in_set_override_wins() {
+        let overrides = A11yOverrides {
+            position_in_set: Some(5),
+            ..Default::default()
+        };
+        let base = Accessible {
+            position_in_set: Some(1),
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert_eq!(merged.position_in_set, Some(5));
+    }
+
+    #[test]
+    fn apply_to_size_of_set_falls_back_to_base() {
+        let overrides = A11yOverrides::default();
+        let base = Accessible {
+            size_of_set: Some(10),
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert_eq!(merged.size_of_set, Some(10));
+    }
+
+    #[test]
+    fn apply_to_has_popup_override_wins() {
+        let overrides = A11yOverrides {
+            has_popup: Some(accessible::HasPopup::Grid),
+            ..Default::default()
+        };
+        let base = Accessible {
+            has_popup: Some(accessible::HasPopup::Listbox),
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert_eq!(merged.has_popup, Some(accessible::HasPopup::Grid));
+    }
+
+    #[test]
+    fn apply_to_has_popup_falls_back_to_base() {
+        let overrides = A11yOverrides::default();
+        let base = Accessible {
+            has_popup: Some(accessible::HasPopup::Menu),
+            ..Default::default()
+        };
+        let merged = overrides.apply_to(&base);
+        assert_eq!(merged.has_popup, Some(accessible::HasPopup::Menu));
+    }
+
+    // -- A11yInterceptor integration tests ------------------------------------
+
+    /// A recording operation that captures accessible(), container(),
+    /// and text() calls for assertion.
+    struct RecordingOperation {
+        accessible_calls: Vec<RecordedAccessible>,
+        container_calls: Vec<bool>,
+        text_calls: Vec<String>,
+    }
+
+    #[allow(dead_code)]
+    struct RecordedAccessible {
+        role: accessible::Role,
+        label: Option<String>,
+        disabled: bool,
+        position_in_set: Option<usize>,
+        size_of_set: Option<usize>,
+        has_popup: Option<accessible::HasPopup>,
+    }
+
+    impl RecordingOperation {
+        fn new() -> Self {
+            Self {
+                accessible_calls: Vec::new(),
+                container_calls: Vec::new(),
+                text_calls: Vec::new(),
+            }
+        }
+    }
+
+    impl widget::Operation for RecordingOperation {
+        fn accessible(
+            &mut self,
+            _id: Option<&widget::Id>,
+            _bounds: Rectangle,
+            accessible: &Accessible<'_>,
+        ) {
+            self.accessible_calls.push(RecordedAccessible {
+                role: accessible.role,
+                label: accessible.label.map(String::from),
+                disabled: accessible.disabled,
+                position_in_set: accessible.position_in_set,
+                size_of_set: accessible.size_of_set,
+                has_popup: accessible.has_popup,
+            });
+        }
+
+        fn container(&mut self, _id: Option<&widget::Id>, _bounds: Rectangle) {
+            self.container_calls.push(true);
+        }
+
+        fn text(&mut self, _id: Option<&widget::Id>, _bounds: Rectangle, text: &str) {
+            self.text_calls.push(text.to_owned());
+        }
+
+        fn focusable(
+            &mut self,
+            _id: Option<&widget::Id>,
+            _bounds: Rectangle,
+            _state: &mut dyn widget::operation::focusable::Focusable,
+        ) {
+        }
+
+        fn scrollable(
+            &mut self,
+            _id: Option<&widget::Id>,
+            _bounds: Rectangle,
+            _content_bounds: Rectangle,
+            _translation: Vector,
+            _state: &mut dyn widget::operation::scrollable::Scrollable,
+        ) {
+        }
+
+        fn text_input(
+            &mut self,
+            _id: Option<&widget::Id>,
+            _bounds: Rectangle,
+            _state: &mut dyn widget::operation::text_input::TextInput,
+        ) {
+        }
+
+        fn custom(
+            &mut self,
+            _id: Option<&widget::Id>,
+            _bounds: Rectangle,
+            _state: &mut dyn std::any::Any,
+        ) {
+        }
+
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+
+        fn finish(&self) -> widget::operation::Outcome<()> {
+            widget::operation::Outcome::None
+        }
+    }
+
+    #[test]
+    fn interceptor_merges_overrides_with_base_accessible() {
+        let overrides = A11yOverrides {
+            label: Some("Override label".into()),
+            role: Some(accessible::Role::Link),
+            ..Default::default()
+        };
+        let base = Accessible {
+            role: accessible::Role::Button,
+            label: Some("Click me"),
+            disabled: true,
+            ..Default::default()
+        };
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.accessible(None, Rectangle::default(), &base);
+        }
+        assert_eq!(recording.accessible_calls.len(), 1);
+        let call = &recording.accessible_calls[0];
+        assert_eq!(call.role, accessible::Role::Link);
+        assert_eq!(call.label.as_deref(), Some("Override label"));
+        assert!(call.disabled); // Preserved from base.
+    }
+
+    #[test]
+    fn interceptor_hidden_suppresses_accessible() {
+        let overrides = A11yOverrides {
+            hidden: true,
+            ..Default::default()
+        };
+        let base = Accessible {
+            role: accessible::Role::Button,
+            label: Some("Hidden button"),
+            ..Default::default()
+        };
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.accessible(None, Rectangle::default(), &base);
+        }
+        assert!(recording.accessible_calls.is_empty());
+    }
+
+    #[test]
+    fn interceptor_hidden_suppresses_text() {
+        let overrides = A11yOverrides {
+            hidden: true,
+            ..Default::default()
+        };
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.text(None, Rectangle::default(), "should not appear");
+        }
+        assert!(recording.text_calls.is_empty());
+    }
+
+    #[test]
+    fn interceptor_container_upgrades_when_overrides_present() {
+        let overrides = A11yOverrides {
+            role: Some(accessible::Role::Group),
+            label: Some("Nav group".into()),
+            ..Default::default()
+        };
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.container(None, Rectangle::default());
+        }
+        // Container was upgraded to accessible.
+        assert!(recording.container_calls.is_empty());
+        assert_eq!(recording.accessible_calls.len(), 1);
+        let call = &recording.accessible_calls[0];
+        assert_eq!(call.role, accessible::Role::Group);
+        assert_eq!(call.label.as_deref(), Some("Nav group"));
+    }
+
+    #[test]
+    fn interceptor_container_passes_through_without_overrides() {
+        let overrides = A11yOverrides::default();
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.container(None, Rectangle::default());
+        }
+        assert_eq!(recording.container_calls.len(), 1);
+        assert!(recording.accessible_calls.is_empty());
+    }
+
+    #[test]
+    fn interceptor_hidden_suppresses_container() {
+        let overrides = A11yOverrides {
+            hidden: true,
+            ..Default::default()
+        };
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.container(None, Rectangle::default());
+        }
+        assert!(recording.container_calls.is_empty());
+        assert!(recording.accessible_calls.is_empty());
+    }
+
+    #[test]
+    fn interceptor_traverse_propagates_hidden_to_children() {
+        let overrides = A11yOverrides {
+            hidden: true,
+            ..Default::default()
+        };
+        let mut recording = RecordingOperation::new();
+        {
+            let mut interceptor = A11yInterceptor {
+                inner: &mut recording,
+                overrides: &overrides,
+            };
+            interceptor.traverse(&mut |child_op| {
+                // The child operation should also suppress accessible calls.
+                let base = Accessible {
+                    role: accessible::Role::Button,
+                    label: Some("Child button"),
+                    ..Default::default()
+                };
+                child_op.accessible(None, Rectangle::default(), &base);
+                child_op.text(None, Rectangle::default(), "child text");
+            });
+        }
+        assert!(recording.accessible_calls.is_empty());
+        assert!(recording.text_calls.is_empty());
     }
 }
