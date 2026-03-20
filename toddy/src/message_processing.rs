@@ -61,23 +61,23 @@ pub(crate) fn process_widget_message(
         | Message::CanvasScroll { .. }) => message_to_event(m).into_iter().collect(),
 
         // Slider -- needs value tracking for SlideRelease.
-        Message::Slide(ref id, value) => {
+        Message::Slide(id, value) => {
             last_slide_values.insert(id.clone(), value);
-            vec![OutgoingEvent::slide(id.clone(), value)]
+            vec![OutgoingEvent::slide(id, value)]
         }
-        Message::SlideRelease(ref id) => {
-            let value = last_slide_values.remove(id).unwrap_or(0.0);
-            vec![OutgoingEvent::slide_release(id.clone(), value)]
+        Message::SlideRelease(id) => {
+            let value = last_slide_values.remove(&id).unwrap_or(0.0);
+            vec![OutgoingEvent::slide_release(id, value)]
         }
 
         // Text editor -- apply action to content, emit new text.
-        Message::TextEditorAction(ref id, ref action) => {
+        Message::TextEditorAction(id, action) => {
             if action.is_edit()
-                && let Some(content) = caches.editor_content_mut(id)
+                && let Some(content) = caches.editor_content_mut(&id)
             {
-                content.perform(action.clone());
+                content.perform(action);
                 let new_text = content.text();
-                return vec![OutgoingEvent::input(id.clone(), new_text)];
+                return vec![OutgoingEvent::input(id, new_text)];
             }
             vec![]
         }

@@ -103,7 +103,7 @@ macro_rules! apply_dialog_params {
 // ---------------------------------------------------------------------------
 
 /// Returns true for effect kinds that should run asynchronously (file dialogs).
-pub fn is_async_effect(kind: &str) -> bool {
+pub(crate) fn is_async_effect(kind: &str) -> bool {
     matches!(
         kind,
         "file_open"
@@ -122,7 +122,7 @@ pub fn is_async_effect(kind: &str) -> bool {
 ///
 /// Clipboard and notification effects are always synchronous regardless
 /// of which dispatch function is used.
-pub fn handle_effect(id: String, kind: &str, payload: &Value) -> EffectResponse {
+pub(crate) fn handle_effect(id: String, kind: &str, payload: &Value) -> EffectResponse {
     match kind {
         "file_open" => handle_file_open(id, payload),
         "file_open_multiple" => handle_file_open_multiple(id, payload),
@@ -151,7 +151,11 @@ pub fn handle_effect(id: String, kind: &str, payload: &Value) -> EffectResponse 
 /// Note: on X11-only Linux desktops without a portal (e.g. minimal WMs),
 /// rfd falls back to a GTK dialog which may block a tokio worker thread.
 /// This is a known rfd limitation, not specific to toddy.
-pub async fn handle_async_effect(id: String, effect_type: &str, params: &Value) -> EffectResponse {
+pub(crate) async fn handle_async_effect(
+    id: String,
+    effect_type: &str,
+    params: &Value,
+) -> EffectResponse {
     match effect_type {
         "file_open" => {
             let p = parse_dialog_params(params, "Open File");
