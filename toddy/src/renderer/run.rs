@@ -168,6 +168,7 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
 /// to `\n` on read. That breaks both MessagePack length-prefixed framing
 /// and any binary payload (screenshots, font data, image bytes).
 #[cfg(windows)]
+#[allow(unsafe_code)] // Required for CRT _setmode FFI -- no safe alternative.
 fn set_binary_mode() {
     extern "C" {
         fn _setmode(fd: i32, mode: i32) -> i32;

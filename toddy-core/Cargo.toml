@@ -15,6 +15,9 @@ readme = "../README.md"
 name = "toddy_core"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 iced = { version = "0.6", package = "toddy-iced", features = ["tokio", "advanced", "image", "svg", "canvas", "markdown", "highlighter", "sysinfo"] }
 serde = { version = "1", features = ["derive"] }

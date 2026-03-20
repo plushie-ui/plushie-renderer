@@ -15,6 +15,9 @@ readme = "../README.md"
 name = "toddy"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "toddy"
 path = "src/main.rs"

@@ -18,8 +18,6 @@
 //! (`{` = JSON, anything else = MessagePack). Override with `--json` or
 //! `--msgpack`.
 
-#![deny(warnings)]
-
 mod effects;
 mod headless;
 mod message_processing;

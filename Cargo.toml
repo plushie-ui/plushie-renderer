@@ -11,3 +11,17 @@ repository = "https://github.com/toddy-ui/toddy"
 authors = ["Daniel Hedlund <daniel@digitree.org>"]
 keywords = ["gui", "desktop", "renderer", "native", "iced"]
 categories = ["gui", "rendering"]
+
+# Lint configuration. CI also passes RUSTFLAGS="-D warnings" (via justfile)
+# which promotes ALL warnings to errors. The lints below catch things that
+# should always be errors regardless of CI, and survive Rust toolchain
+# upgrades (unlike the brittle #![deny(warnings)] crate attribute).
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+unreachable_patterns = "deny"
+
+[workspace.lints.clippy]
+# CI promotes all warnings to errors via RUSTFLAGS="-D warnings" in the
+# justfile. Specific clippy denials go here only when they should block
+# local development too (not just CI).

@@ -22,8 +22,6 @@
 //! `engine`, `tree`, `message`, `widgets`, `protocol`, `codec`,
 //! `theming`, `image_registry`
 
-#![deny(warnings)]
-
 // Ensure catch_unwind works: extension panic isolation requires unwinding.
 // If this fails, remove `panic = "abort"` from your Cargo profile.
 #[cfg(all(not(test), panic = "abort"))]
