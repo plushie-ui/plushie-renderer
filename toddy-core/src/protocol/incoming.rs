@@ -121,7 +121,7 @@ pub struct ExtensionCommandItem {
 /// - null / absent (returns None)
 ///
 /// When the codec's rmpv-based decode extracts binary fields and injects them
-/// as `serde_json::Value::Array` of u8 values, serde picks them up as Vec<u8>.
+/// as `serde_json::Value::Array` of u8 values, serde picks them up as `Vec<u8>`.
 /// When the field arrives as a base64 string (JSON mode), we decode it here.
 fn deserialize_binary_field<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
 where

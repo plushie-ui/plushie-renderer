@@ -13,10 +13,10 @@ use serde_json::Value;
 /// constructor patterns:
 ///
 /// - **Widget events** (click, input, toggle, etc.) use `id` to identify
-///   the source widget. Built via [`bare`](Self::bare).
+///   the source widget. Built via the internal `bare()` constructor.
 /// - **Subscription events** (key_press, cursor_moved, window_opened,
 ///   etc.) use `tag` to identify the subscription that requested them.
-///   Built via [`tagged`](Self::tagged). The `id` field is empty.
+///   Built via the internal `tagged()` constructor. The `id` field is empty.
 ///
 /// Extension authors emit custom events via
 /// [`extension_event`](Self::extension_event).

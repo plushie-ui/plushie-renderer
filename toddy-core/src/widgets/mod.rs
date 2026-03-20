@@ -1,7 +1,7 @@
 //! Widget rendering: tree node to iced element mapping.
 //!
-//! The public API is [`render`] (immutable dispatch) and [`ensure_caches`]
-//! (mutable cache pre-population). See [`WidgetCaches`] for the cache bundle.
+//! The public API is `render()` (immutable dispatch) and `ensure_caches()`
+//! (mutable cache pre-population). See `WidgetCaches` for the cache bundle.
 
 pub(crate) mod a11y;
 mod caches;
