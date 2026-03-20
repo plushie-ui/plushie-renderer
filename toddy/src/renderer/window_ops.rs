@@ -772,10 +772,21 @@ impl App {
 // Settings / enum parsing helpers
 // ---------------------------------------------------------------------------
 
+/// Maximum window dimension in logical pixels.
+const MAX_WINDOW_DIM: f32 = 16384.0;
+
 /// Parse a full `window::Settings` from a JSON value (node props or op settings).
 pub(super) fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
-    let width = v.get("width").and_then(|v| v.as_f64()).unwrap_or(800.0) as f32;
-    let height = v.get("height").and_then(|v| v.as_f64()).unwrap_or(600.0) as f32;
+    let mut width = v.get("width").and_then(|v| v.as_f64()).unwrap_or(800.0) as f32;
+    let mut height = v.get("height").and_then(|v| v.as_f64()).unwrap_or(600.0) as f32;
+    if !(1.0..=MAX_WINDOW_DIM).contains(&width) {
+        log::warn!("window width {width} out of range, clamping to 1.0..={MAX_WINDOW_DIM}");
+        width = width.clamp(1.0, MAX_WINDOW_DIM);
+    }
+    if !(1.0..=MAX_WINDOW_DIM).contains(&height) {
+        log::warn!("window height {height} out of range, clamping to 1.0..={MAX_WINDOW_DIM}");
+        height = height.clamp(1.0, MAX_WINDOW_DIM);
+    }
 
     let maximized = v
         .get("maximized")
