@@ -443,6 +443,13 @@ fn handle_message(
     let is_tree_change = is_snapshot || matches!(msg, IncomingMessage::Patch { .. });
     let is_settings = matches!(msg, IncomingMessage::Settings { .. });
 
+    // Extract font file paths from Settings before Core consumes the message.
+    // Fonts are loaded directly into the global font system (no iced Task
+    // runtime available in headless mode).
+    if let IncomingMessage::Settings { ref settings } = msg {
+        load_fonts_from_settings(settings);
+    }
+
     match msg {
         IncomingMessage::Snapshot { .. }
         | IncomingMessage::Patch { .. }
@@ -523,6 +530,12 @@ fn handle_message(
                         s.dispatcher.init_all(&config);
                     }
                     CoreEffect::SyncWindows => {}
+                    CoreEffect::WidgetOp {
+                        ref op,
+                        ref payload,
+                    } if op == "load_font" => {
+                        load_font_from_payload(payload);
+                    }
                     CoreEffect::WidgetOp { .. } => {}
                     CoreEffect::WindowOp { .. } => {}
                     CoreEffect::ThemeFollowsSystem => {}
@@ -856,6 +869,61 @@ pub(crate) fn run(
     }
 
     log::info!("stdin closed, exiting");
+}
+
+// ---------------------------------------------------------------------------
+// Font loading (headless-specific)
+// ---------------------------------------------------------------------------
+
+/// Load fonts from the Settings message's `fonts` array.
+///
+/// In windowed mode, fonts are loaded via iced Tasks during daemon init.
+/// Headless mode has no Task runtime, so we load fonts directly into
+/// the global font system that the tiny-skia renderer uses.
+fn load_fonts_from_settings(settings: &serde_json::Value) {
+    let Some(fonts) = settings.get("fonts").and_then(|v| v.as_array()) else {
+        return;
+    };
+    for font_val in fonts {
+        if let Some(path) = font_val.as_str() {
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    load_font_bytes(bytes);
+                    log::info!("loaded font: {path}");
+                }
+                Err(e) => {
+                    log::error!("failed to load font {path}: {e}");
+                }
+            }
+        }
+    }
+}
+
+/// Load a font from a `load_font` WidgetOp payload (base64-encoded data).
+fn load_font_from_payload(payload: &serde_json::Value) {
+    let Some(data_str) = payload.get("data").and_then(|v| v.as_str()) else {
+        log::warn!("load_font: missing or invalid 'data' field");
+        return;
+    };
+    match base64::Engine::decode(&base64::prelude::BASE64_STANDARD, data_str) {
+        Ok(bytes) => {
+            load_font_bytes(bytes);
+            log::info!("loaded font from base64 ({} bytes)", data_str.len() * 3 / 4);
+        }
+        Err(e) => {
+            log::error!("load_font: base64 decode error: {e}");
+        }
+    }
+}
+
+/// Register font bytes with the global font system.
+///
+/// The font system is shared between all iced renderers (windowed and
+/// headless). Once loaded, fonts are available to all subsequent renders.
+fn load_font_bytes(bytes: Vec<u8>) {
+    let fs = iced::advanced::graphics::text::font_system();
+    let mut guard = fs.write().expect("font system lock");
+    guard.load_font(std::borrow::Cow::Owned(bytes));
 }
 
 /// Read and decode the next message from a BufRead source.
