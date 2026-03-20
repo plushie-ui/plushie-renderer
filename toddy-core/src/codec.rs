@@ -173,8 +173,20 @@ impl Codec {
                 let rmpv_val: rmpv::Value = rmpv::decode::read_value(&mut &bytes[..])
                     .map_err(|e| format!("msgpack decode (rmpv): {e}"))?;
                 let json_val = rmpv_to_json(rmpv_val);
-                serde_json::from_value(json_val)
-                    .map_err(|e| format!("msgpack decode (tag dispatch): {e}"))
+                serde_json::from_value(json_val.clone()).map_err(|e| {
+                    let mut msg = format!("msgpack decode (tag dispatch): {e}");
+                    #[cfg(debug_assertions)]
+                    {
+                        let dump = json_val.to_string();
+                        let truncated = if dump.len() > 512 {
+                            format!("{}...", &dump[..512])
+                        } else {
+                            dump
+                        };
+                        msg.push_str(&format!(" | json: {truncated}"));
+                    }
+                    msg
+                })
             }
         }
     }
@@ -255,7 +267,12 @@ impl Codec {
         }
     }
 
-    /// Store the negotiated codec in the global slot. Panics if called twice.
+    /// Store the negotiated codec in the global slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called more than once per process lifetime. The codec is
+    /// determined at startup from the first byte of stdin and must not change.
     pub fn set_global(codec: Codec) {
         WIRE_CODEC
             .set(codec)
