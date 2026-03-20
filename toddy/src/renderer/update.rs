@@ -3,23 +3,28 @@
 
 use iced::{Task, Theme, window};
 
-use toddy_core::extensions::EventResult;
 use toddy_core::message::{Message, StdinEvent};
 use toddy_core::protocol::{IncomingMessage, OutgoingEvent};
 
 use super::App;
 use super::constants::*;
-use super::emitters::{self, emit_event, emit_screenshot_response, message_to_event};
+use super::emitters::{self, emit_event, emit_screenshot_response};
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Stdin(event) => self.handle_stdin(event),
             Message::NoOp => Task::none(),
-            // Direct-emit widget events: convert via message_to_event and emit.
-            // These need no state mutation, extension routing, or subscription
-            // lookup -- just a straight Message -> OutgoingEvent -> stdout.
-            ref msg @ (Message::Click(_)
+
+            // Widget messages shared between daemon and headless modes.
+            // The shared processor handles slider tracking, text editor
+            // mutation, extension event routing, and pane grid state.
+            //
+            // Redraw contract: iced::daemon rebuilds UIs after every
+            // update() call regardless of the returned Task. Extensions
+            // using canvas::Cache must clear caches themselves (see
+            // GenerationCounter in extensions.rs).
+            msg @ (Message::Click(_)
             | Message::Input(..)
             | Message::Submit(..)
             | Message::Toggle(..)
@@ -32,99 +37,25 @@ impl App {
             | Message::MouseAreaMove(..)
             | Message::MouseAreaScroll(..)
             | Message::CanvasEvent { .. }
-            | Message::CanvasScroll { .. }) => match message_to_event(msg) {
-                Some(event) => emitters::emit_or_exit(event),
-                None => Task::none(),
-            },
-            Message::Slide(ref id, value) => {
-                self.last_slide_values.insert(id.clone(), value);
-                emitters::emit_or_exit(OutgoingEvent::slide(id.clone(), value))
-            }
-            Message::SlideRelease(ref id) => {
-                let value = self.last_slide_values.remove(id).unwrap_or(0.0);
-                emitters::emit_or_exit(OutgoingEvent::slide_release(id.clone(), value))
-            }
-            // Generic extension-aware events: route through dispatcher first.
-            //
-            // Redraw contract: iced::daemon rebuilds user interfaces (calls
-            // view_window for every open window) and requests a
-            // window-level redraw after every update() call, regardless of
-            // the Task returned here. Returning Task::none() is therefore
-            // correct for all three EventResult variants -- the view IS
-            // rebuilt, and any state the extension mutated in
-            // ExtensionCaches will be visible to the next render() call.
-            //
-            // Canvas caching note: if an extension renders via
-            // canvas::Cache, the cached geometry is NOT automatically
-            // invalidated by a view rebuild. The extension must call
-            // cache.clear() itself when its state changes -- typically by
-            // using a GenerationCounter (see extensions.rs) bumped in
-            // handle_event and checked in Program::draw(). There is no
-            // need to emit dummy events or return special Tasks to force a
-            // redraw; iced already takes care of the update-view-render
-            // cycle.
-            Message::Event {
-                ref id,
-                ref data,
-                ref family,
-            } => {
-                let result =
-                    self.dispatcher
-                        .handle_event(id, family, data, &mut self.core.caches.extension);
-                let emit_result = match result {
-                    EventResult::PassThrough => {
-                        let data_opt = if data.is_null() {
-                            None
-                        } else {
-                            Some(data.clone())
-                        };
-                        emit_event(OutgoingEvent::generic(family.clone(), id.clone(), data_opt))
-                    }
-                    EventResult::Consumed(events) => {
-                        let mut r = Ok(());
-                        for ev in events {
-                            r = emit_event(ev);
-                            if r.is_err() {
-                                break;
-                            }
-                        }
-                        r
-                    }
-                    EventResult::Observed(events) => {
-                        let data_opt = if data.is_null() {
-                            None
-                        } else {
-                            Some(data.clone())
-                        };
-                        let mut r = emit_event(OutgoingEvent::generic(
-                            family.clone(),
-                            id.clone(),
-                            data_opt,
-                        ));
-                        if r.is_ok() {
-                            for ev in events {
-                                r = emit_event(ev);
-                                if r.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                        r
-                    }
-                };
-                if let Err(e) = emit_result {
-                    log::error!("write error: {e}");
-                    return iced::exit();
-                }
-                Task::none()
-            }
-            Message::TextEditorAction(id, action) => {
-                let is_edit = action.is_edit();
-                if let Some(content) = self.core.caches.editor_content_mut(&id) {
-                    content.perform(action);
-                    if is_edit {
-                        let new_text = content.text();
-                        return emitters::emit_or_exit(OutgoingEvent::input(id, new_text));
+            | Message::CanvasScroll { .. }
+            | Message::Slide(..)
+            | Message::SlideRelease(..)
+            | Message::TextEditorAction(..)
+            | Message::Event { .. }
+            | Message::PaneFocusCycle(..)
+            | Message::PaneResized(..)
+            | Message::PaneDragged(..)
+            | Message::PaneClicked(..)) => {
+                let events = crate::message_processing::process_widget_message(
+                    msg,
+                    &mut self.core.caches,
+                    &mut self.dispatcher,
+                    &mut self.last_slide_values,
+                );
+                for event in events {
+                    if let Err(e) = emit_event(event) {
+                        log::error!("write error: {e}");
+                        return iced::exit();
                     }
                 }
                 Task::none()
@@ -257,18 +188,6 @@ impl App {
                 } else {
                     Task::none()
                 }
-            }
-            Message::PaneResized(grid_id, evt) => self.handle_pane_resized(grid_id, evt),
-            Message::PaneDragged(grid_id, evt) => self.handle_pane_dragged(grid_id, evt),
-            Message::PaneClicked(grid_id, pane) => self.handle_pane_clicked(grid_id, pane),
-            Message::PaneFocusCycle(grid_id, pane) => {
-                if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
-                    let pane_id = state.get(pane).cloned().unwrap_or_default();
-                    return emitters::emit_or_exit(OutgoingEvent::pane_focus_cycle(
-                        grid_id, pane_id,
-                    ));
-                }
-                Task::none()
             }
         }
     }

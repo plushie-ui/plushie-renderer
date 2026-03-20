@@ -4,7 +4,6 @@
 
 use std::io;
 
-use iced::widget::pane_grid;
 use iced::{Point, Task, window};
 
 use toddy_core::message::{
@@ -14,7 +13,7 @@ use toddy_core::protocol::OutgoingEvent;
 
 use super::App;
 use super::constants::*;
-use super::emitters::{self, emit_event};
+use super::emitters::emit_event;
 
 /// Convert a file path to a UTF-8 string, using lossy conversion if
 /// the path contains non-UTF-8 bytes (rare on modern systems, but
@@ -307,102 +306,6 @@ impl App {
         if let Err(e) = result {
             log::error!("write error: {e}");
             return iced::exit();
-        }
-        Task::none()
-    }
-
-    pub(super) fn handle_pane_resized(
-        &mut self,
-        grid_id: String,
-        evt: pane_grid::ResizeEvent,
-    ) -> Task<Message> {
-        if let Some(state) = self.core.caches.pane_grid_state_mut(&grid_id) {
-            state.resize(evt.split, evt.ratio);
-        }
-        emitters::emit_or_exit(OutgoingEvent::pane_resized(
-            grid_id,
-            format!("{:?}", evt.split),
-            evt.ratio,
-        ))
-    }
-
-    pub(super) fn handle_pane_dragged(
-        &mut self,
-        grid_id: String,
-        evt: pane_grid::DragEvent,
-    ) -> Task<Message> {
-        let result: io::Result<()> = (|| {
-            match evt {
-                pane_grid::DragEvent::Picked { pane } => {
-                    if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
-                        let pane_id = state.get(pane).cloned().unwrap_or_default();
-                        emit_event(OutgoingEvent::pane_dragged(
-                            grid_id, "picked", pane_id, None, None, None,
-                        ))?;
-                    }
-                }
-                pane_grid::DragEvent::Dropped { pane, target } => {
-                    if let Some(state) = self.core.caches.pane_grid_state_mut(&grid_id) {
-                        let pane_id = state.get(pane).cloned().unwrap_or_default();
-                        let (target_pane, region, edge) = match target {
-                            pane_grid::Target::Edge(e) => {
-                                let edge_str = match e {
-                                    pane_grid::Edge::Top => "top",
-                                    pane_grid::Edge::Bottom => "bottom",
-                                    pane_grid::Edge::Left => "left",
-                                    pane_grid::Edge::Right => "right",
-                                };
-                                (None, None, Some(edge_str))
-                            }
-                            pane_grid::Target::Pane(p, region) => {
-                                let target_id = state.get(p).cloned().unwrap_or_default();
-                                let region_str = match region {
-                                    pane_grid::Region::Center => "center",
-                                    pane_grid::Region::Edge(pane_grid::Edge::Top) => "top",
-                                    pane_grid::Region::Edge(pane_grid::Edge::Bottom) => "bottom",
-                                    pane_grid::Region::Edge(pane_grid::Edge::Left) => "left",
-                                    pane_grid::Region::Edge(pane_grid::Edge::Right) => "right",
-                                };
-                                (Some(target_id), Some(region_str), None)
-                            }
-                        };
-                        state.drop(pane, target);
-                        emit_event(OutgoingEvent::pane_dragged(
-                            grid_id,
-                            "dropped",
-                            pane_id,
-                            target_pane,
-                            region,
-                            edge,
-                        ))?;
-                    }
-                }
-                pane_grid::DragEvent::Canceled { pane } => {
-                    if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
-                        let pane_id = state.get(pane).cloned().unwrap_or_default();
-                        emit_event(OutgoingEvent::pane_dragged(
-                            grid_id, "canceled", pane_id, None, None, None,
-                        ))?;
-                    }
-                }
-            }
-            Ok(())
-        })();
-        if let Err(e) = result {
-            log::error!("write error: {e}");
-            return iced::exit();
-        }
-        Task::none()
-    }
-
-    pub(super) fn handle_pane_clicked(
-        &self,
-        grid_id: String,
-        pane: pane_grid::Pane,
-    ) -> Task<Message> {
-        if let Some(state) = self.core.caches.pane_grid_state(&grid_id) {
-            let pane_id = state.get(pane).cloned().unwrap_or_default();
-            return emitters::emit_or_exit(OutgoingEvent::pane_clicked(grid_id, pane_id));
         }
         Task::none()
     }

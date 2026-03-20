@@ -32,12 +32,11 @@ use serde::Serialize;
 
 use toddy_core::codec::Codec;
 use toddy_core::engine::Core;
-use toddy_core::extensions::{EventResult, ExtensionDispatcher, RenderCtx};
+use toddy_core::extensions::{ExtensionDispatcher, RenderCtx};
 use toddy_core::image_registry::ImageRegistry;
 use toddy_core::message::Message;
 use toddy_core::protocol::{IncomingMessage, OutgoingEvent, SessionMessage};
 
-use crate::renderer::emitters::message_to_event;
 use crate::scripting::{interaction_to_iced_events, resolve_widget_id};
 
 /// Default screenshot width when not specified by the caller.
@@ -403,209 +402,18 @@ impl Session {
         emitted_steps
     }
 
-    /// Convert iced Messages to OutgoingEvents using the same
-    /// conversion logic as the daemon's `update()` method.
-    ///
-    /// Handles all Message variants that produce user-visible events:
-    /// - Simple widget events via `message_to_event()` (click, input, etc.)
-    /// - Slider with value tracking (SlideRelease needs the last value)
-    /// - TextEditorAction with editor content mutation
-    /// - Extension events via dispatcher routing
-    /// - Pane grid events
+    /// Convert iced Messages to OutgoingEvents using the shared
+    /// message processing logic.
     fn process_captured_messages(&mut self, messages: Vec<Message>) -> Vec<OutgoingEvent> {
         let mut events = Vec::new();
-
         for msg in messages {
-            match msg {
-                // Simple widget events -- stateless conversion.
-                ref m @ (Message::Click(_)
-                | Message::Input(..)
-                | Message::Submit(..)
-                | Message::Toggle(..)
-                | Message::Select(..)
-                | Message::Paste(..)
-                | Message::OptionHovered(..)
-                | Message::SensorResize(..)
-                | Message::ScrollEvent(..)
-                | Message::MouseAreaEvent(..)
-                | Message::MouseAreaMove(..)
-                | Message::MouseAreaScroll(..)
-                | Message::CanvasEvent { .. }
-                | Message::CanvasScroll { .. }) => {
-                    if let Some(event) = message_to_event(m) {
-                        events.push(event);
-                    }
-                }
-
-                // Slider -- needs value tracking for SlideRelease.
-                Message::Slide(ref id, value) => {
-                    self.last_slide_values.insert(id.clone(), value);
-                    events.push(OutgoingEvent::slide(id.clone(), value));
-                }
-                Message::SlideRelease(ref id) => {
-                    let value = self.last_slide_values.remove(id).unwrap_or(0.0);
-                    events.push(OutgoingEvent::slide_release(id.clone(), value));
-                }
-
-                // Text editor -- apply action to editor content, emit new text.
-                Message::TextEditorAction(ref id, ref action) => {
-                    if action.is_edit()
-                        && let Some(content) = self.core.caches.editor_content_mut(id)
-                    {
-                        content.perform(action.clone());
-                        let new_text = content.text();
-                        events.push(OutgoingEvent::input(id.clone(), new_text));
-                    }
-                }
-
-                // Extension events -- route through dispatcher.
-                Message::Event {
-                    ref id,
-                    ref data,
-                    ref family,
-                } => {
-                    let result = self.dispatcher.handle_event(
-                        id,
-                        family,
-                        data,
-                        &mut self.core.caches.extension,
-                    );
-                    match result {
-                        EventResult::PassThrough => {
-                            let data_opt = if data.is_null() {
-                                None
-                            } else {
-                                Some(data.clone())
-                            };
-                            events.push(OutgoingEvent::generic(
-                                family.clone(),
-                                id.clone(),
-                                data_opt,
-                            ));
-                        }
-                        EventResult::Consumed(ext_events) => {
-                            events.extend(ext_events);
-                        }
-                        EventResult::Observed(ext_events) => {
-                            let data_opt = if data.is_null() {
-                                None
-                            } else {
-                                Some(data.clone())
-                            };
-                            events.push(OutgoingEvent::generic(
-                                family.clone(),
-                                id.clone(),
-                                data_opt,
-                            ));
-                            events.extend(ext_events);
-                        }
-                    }
-                }
-
-                // Pane grid events -- need pane state lookup.
-                Message::PaneFocusCycle(ref grid_id, pane) => {
-                    if let Some(state) = self.core.caches.pane_grid_state(grid_id) {
-                        let pane_id = state.get(pane).cloned().unwrap_or_default();
-                        events.push(OutgoingEvent::pane_focus_cycle(grid_id.clone(), pane_id));
-                    }
-                }
-                Message::PaneResized(ref grid_id, ref evt) => {
-                    if let Some(state) = self.core.caches.pane_grid_state_mut(grid_id) {
-                        state.resize(evt.split, evt.ratio);
-                    }
-                    events.push(OutgoingEvent::pane_resized(
-                        grid_id.clone(),
-                        format!("{:?}", evt.split),
-                        evt.ratio,
-                    ));
-                }
-                Message::PaneDragged(ref grid_id, ref evt) => {
-                    use iced::widget::pane_grid;
-                    match evt {
-                        pane_grid::DragEvent::Picked { pane } => {
-                            if let Some(state) = self.core.caches.pane_grid_state(grid_id) {
-                                let pane_id = state.get(*pane).cloned().unwrap_or_default();
-                                events.push(OutgoingEvent::pane_dragged(
-                                    grid_id.clone(),
-                                    "picked",
-                                    pane_id,
-                                    None,
-                                    None,
-                                    None,
-                                ));
-                            }
-                        }
-                        pane_grid::DragEvent::Dropped { pane, target } => {
-                            if let Some(state) = self.core.caches.pane_grid_state_mut(grid_id) {
-                                let pane_id = state.get(*pane).cloned().unwrap_or_default();
-                                let (target_pane, region, edge) = match target {
-                                    pane_grid::Target::Edge(e) => {
-                                        let edge_str = match e {
-                                            pane_grid::Edge::Top => "top",
-                                            pane_grid::Edge::Bottom => "bottom",
-                                            pane_grid::Edge::Left => "left",
-                                            pane_grid::Edge::Right => "right",
-                                        };
-                                        (None, None, Some(edge_str))
-                                    }
-                                    pane_grid::Target::Pane(p, region) => {
-                                        let target_id = state.get(*p).cloned().unwrap_or_default();
-                                        let region_str = match region {
-                                            pane_grid::Region::Center => "center",
-                                            pane_grid::Region::Edge(pane_grid::Edge::Top) => "top",
-                                            pane_grid::Region::Edge(pane_grid::Edge::Bottom) => {
-                                                "bottom"
-                                            }
-                                            pane_grid::Region::Edge(pane_grid::Edge::Left) => {
-                                                "left"
-                                            }
-                                            pane_grid::Region::Edge(pane_grid::Edge::Right) => {
-                                                "right"
-                                            }
-                                        };
-                                        (Some(target_id), Some(region_str), None)
-                                    }
-                                };
-                                state.drop(*pane, *target);
-                                events.push(OutgoingEvent::pane_dragged(
-                                    grid_id.clone(),
-                                    "dropped",
-                                    pane_id,
-                                    target_pane,
-                                    region,
-                                    edge,
-                                ));
-                            }
-                        }
-                        pane_grid::DragEvent::Canceled { pane } => {
-                            if let Some(state) = self.core.caches.pane_grid_state(grid_id) {
-                                let pane_id = state.get(*pane).cloned().unwrap_or_default();
-                                events.push(OutgoingEvent::pane_dragged(
-                                    grid_id.clone(),
-                                    "canceled",
-                                    pane_id,
-                                    None,
-                                    None,
-                                    None,
-                                ));
-                            }
-                        }
-                    }
-                }
-                Message::PaneClicked(ref grid_id, pane) => {
-                    if let Some(state) = self.core.caches.pane_grid_state(grid_id) {
-                        let pane_id = state.get(pane).cloned().unwrap_or_default();
-                        events.push(OutgoingEvent::pane_clicked(grid_id.clone(), pane_id));
-                    }
-                }
-
-                // Internal messages and subscription events -- skip.
-                // Subscription events (KeyPressed, CursorMoved, etc.) don't
-                // appear from ui.update() in the interact path.
-                _ => {}
-            }
+            events.extend(crate::message_processing::process_widget_message(
+                msg,
+                &mut self.core.caches,
+                &mut self.dispatcher,
+                &mut self.last_slide_values,
+            ));
         }
-
         events
     }
 }

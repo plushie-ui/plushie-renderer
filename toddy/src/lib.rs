@@ -22,6 +22,7 @@
 
 mod effects;
 mod headless;
+mod message_processing;
 mod renderer;
 mod scripting;
 
