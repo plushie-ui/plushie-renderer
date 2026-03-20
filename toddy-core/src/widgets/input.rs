@@ -949,6 +949,31 @@ pub(crate) fn render_toggler<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 /// all radios in a group with a single event handler.
 ///
 /// Props: `label`, `value`, `selected` (current group value), `group` (event ID).
+///
+/// # Accessibility
+///
+/// For proper screen reader support, the host SDK should wrap all radios
+/// sharing the same `group` in a container with:
+///
+///   - `a11y.role = "group"` -- tells AT the children form a logical group
+///   - `a11y.label = "<group name>"` -- the accessible name for the group
+///
+/// Example host-side tree structure:
+///
+/// ```text
+/// container(a11y: {role: "group", label: "Colour"})
+///   radio(group: "colour", value: "red", label: "Red")
+///   radio(group: "colour", value: "blue", label: "Blue")
+/// ```
+///
+/// Automatic grouping (detecting sibling radios with the same `group`
+/// prop and wrapping them during render) would require parent/sibling
+/// awareness that the render dispatch doesn't currently have. This is
+/// documented as a potential future improvement. In the meantime, the
+/// host-side grouping pattern above is the recommended approach.
+///
+/// Roving tabindex (arrow-key navigation within the group) is also a
+/// future improvement that requires iced-level focus changes.
 pub(crate) fn render_radio<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let value = prop_str(props, "value").unwrap_or_default();
