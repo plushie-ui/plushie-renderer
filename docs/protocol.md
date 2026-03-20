@@ -76,6 +76,31 @@ session value beyond using it for dispatch.
 the renderer runs one session on the main thread with no threading
 overhead. The session field is still present on all messages.
 
+### Session lifecycle events
+
+In multiplexed mode, the renderer emits lifecycle events to inform the
+host when sessions fail or complete teardown.
+
+**session_error**: Emitted when a session thread panics or when
+`max_sessions` is exceeded.
+
+```json
+{"type": "event", "session": "s1", "family": "session_error", "id": "", "data": {"error": "session thread panicked: ..."}}
+```
+
+- Emitted to stdout so the host knows a session is no longer functional.
+- The `session` field identifies which session failed.
+
+**session_closed**: Emitted after a Reset completes and the session
+thread exits.
+
+```json
+{"type": "event", "session": "s1", "family": "session_closed", "id": "", "data": {"reason": "reset"}}
+```
+
+- Confirms the old session has fully torn down.
+- The host should wait for this before recycling the session ID.
+
 ---
 
 ## Startup sequence
@@ -233,6 +258,16 @@ diffing required on the host side.
 
 The renderer replaces the current tree, reconciles windows (opens new
 ones, closes removed ones), and re-renders.
+
+**Duplicate node IDs.** When a snapshot contains duplicate node IDs,
+the renderer accepts the tree but emits an error event:
+
+```json
+{"type": "event", "session": "", "family": "error", "id": "duplicate_node_ids", "data": {"error": "snapshot contains duplicate node IDs", "duplicates": ["btn1 (button)", "btn1 (text)"]}}
+```
+
+The host should treat this as a bug in the tree construction. Duplicate
+IDs cause undefined behavior in widget caching and event routing.
 
 ### Patch
 
@@ -1314,6 +1349,18 @@ Real rendering via tiny-skia. No display server required.
 - Subscriptions work (events emitted on registration match).
 - Window operations are no-ops (no real windows).
 
+**Announce events.** In headless and mock modes, `announce` widget ops
+emit a synthetic event instead of dispatching to the platform
+accessibility layer (which does not exist without a display server):
+
+```json
+{"type": "event", "session": "", "family": "announce", "id": "", "data": {"text": "Item saved successfully"}}
+```
+
+This allows host test suites to verify that announcements are triggered
+correctly. In windowed mode, announces go directly to the platform
+screen reader API and do NOT produce a wire event.
+
 ### Mock mode (`--mock`, `"mode": "mock"`)
 
 No rendering. Protocol-only. Fastest mode for testing.
@@ -1350,12 +1397,33 @@ JSON serialization errors and ensures all values are valid numbers.
 
 ## Limits
 
-| Limit | Value | Description |
-|-------|-------|-------------|
-| Message size | 64 MiB | Maximum wire message payload |
-| Tree depth | 256 | Maximum recursion for tree search and rendering |
-| Screenshot dimension | 16384 px | Maximum width or height for screenshots |
-| MsgPack recursion | 128 | Maximum nesting depth for msgpack decoding |
+| Limit | Value | Applies to |
+|-------|-------|-----------|
+| MAX_MESSAGE_SIZE | 64 MiB | Wire message size (both codecs) |
+| MAX_RMPV_DEPTH | 128 | MessagePack nesting depth |
+| MAX_TREE_DEPTH | 256 | Widget tree recursion depth for rendering, caching, and window search |
+| MAX_FONT_BYTES | 16 MiB | Decoded font data from `load_font` widget op |
+| MAX_LOADED_FONTS | 256 | Runtime font loads per process lifetime |
+| MAX_IMAGES | 4096 | Image handles in the registry |
+| MAX_TOTAL_IMAGE_BYTES | 1 GiB | Aggregate image data in the registry |
+| MAX_DIMENSION | 16384 | Single image dimension (width or height) |
+| MAX_PIXEL_BYTES | 256 MiB | Single RGBA image buffer |
+| MAX_SCREENSHOT_DIMENSION | 16384 | Screenshot width or height |
+| MAX_MARKDOWN_CONTENT | 1 MiB | Markdown widget content (truncated with warning) |
+| MAX_TEXT_EDITOR_CONTENT | 10 MiB | Text editor initial content (truncated with warning) |
+| MAX_FONT_FAMILY_LEN | 256 chars | Font family name length |
+| MAX_FONT_FAMILY_CACHE | 1024 entries | Interned font family name cache |
+| MAX_DASH_CACHE | 1024 entries | Interned canvas dash pattern cache |
+| MAX_WINDOW_DIM | 16384 | Window width or height |
+
+Limits protect against OOM and excessive computation from untrusted or
+buggy input. Most limits return errors to the host; content limits
+(markdown, text editor) truncate with warnings logged to stderr.
+
+Image and font limits are per-process -- resetting a session does not
+reset them. This prevents a misbehaving session from exhausting
+process-wide resources that would affect other sessions in multiplexed
+mode.
 
 ---
 
