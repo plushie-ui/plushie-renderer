@@ -11,9 +11,7 @@ use toddy_core::protocol::OutgoingEvent;
 use super::App;
 use super::emitters::emit_event;
 
-/// Maximum decoded font data size (16 MiB). Font files are typically under
-/// 1 MB; anything larger than this is almost certainly not a font.
-const MAX_FONT_BYTES: usize = 16 * 1024 * 1024;
+use super::constants::MAX_FONT_BYTES;
 
 // ---------------------------------------------------------------------------
 // Widget operations (impl App)

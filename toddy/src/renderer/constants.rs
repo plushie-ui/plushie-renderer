@@ -40,3 +40,8 @@ pub(crate) const DEFAULT_WINDOW_TITLE: &str = "toddy";
 
 /// Default theme when no theme is specified in Settings or after a Reset.
 pub(crate) const DEFAULT_THEME: iced::Theme = iced::Theme::Dark;
+
+/// Maximum decoded font data size for runtime `load_font` operations.
+/// Font files are typically under 1 MB; large CJK fonts top out around
+/// 15-17 MB. Anything beyond this limit is rejected as likely not a font.
+pub(crate) const MAX_FONT_BYTES: usize = 16 * 1024 * 1024;

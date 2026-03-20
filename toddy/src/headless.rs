@@ -921,8 +921,7 @@ fn load_fonts_from_settings(settings: &serde_json::Value) {
     }
 }
 
-/// Maximum decoded font data size (16 MiB). Matches the limit in widget_ops.rs.
-const MAX_FONT_BYTES: usize = 16 * 1024 * 1024;
+use crate::renderer::constants::MAX_FONT_BYTES;
 
 /// Load a font from a `load_font` WidgetOp payload (base64-encoded data).
 fn load_font_from_payload(payload: &serde_json::Value) {
