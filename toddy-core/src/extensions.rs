@@ -172,8 +172,17 @@ pub trait WidgetExtension: Send + Sync + 'static {
     /// deferring to the first `prepare()` call.
     fn init(&mut self, _ctx: &InitCtx<'_>) {}
 
-    /// Initialize or synchronize state for a node. Called in the mutable
-    /// phase before view(), every time the tree changes.
+    /// Initialize or synchronize state for a node.
+    ///
+    /// Called in the mutable phase (after `Core::apply`, before `view()`)
+    /// every time the tree changes (Snapshot or Patch). Nodes are visited
+    /// in **depth-first pre-order** (parent before children) -- this is
+    /// deterministic for a given tree structure. If an extension has
+    /// multiple nodes, they're visited in tree order.
+    ///
+    /// Use this to populate [`ExtensionCaches`] entries that `render()`
+    /// reads. The ensure_caches/render split avoids the need for
+    /// `RefCell` or interior mutability in the view phase.
     fn prepare(&mut self, _node: &TreeNode, _caches: &mut ExtensionCaches, _theme: &Theme) {}
 
     /// Build an iced Element for a node. Called in the immutable phase (view).
@@ -968,11 +977,16 @@ impl Default for ExtensionDispatcher {
 /// impl canvas::Program<Message> for MyProgram {
 ///     type State = MyState;
 ///
-///     fn draw(&self, state: &MyState, ...) -> Vec<Geometry> {
+///     fn draw(&self, state: &mut MyState, ...) -> Vec<Geometry> {
+///         // 1. Compare: has the data changed since the last draw?
 ///         if state.generation != self.current_generation {
+///             // 2. Clear the cached geometry so it's redrawn.
 ///             state.cache.clear();
-///             // update state.generation after draw
+///             // 3. Record the current generation so we don't clear again
+///             //    until the next bump().
+///             state.generation = self.current_generation;
 ///         }
+///         // 4. Draw (cache.draw reuses geometry if not cleared above).
 ///         vec![state.cache.draw(renderer, bounds.size(), |frame| { ... })]
 ///     }
 /// }
@@ -1009,11 +1023,15 @@ impl Default for GenerationCounter {
 // Private helpers
 // ---------------------------------------------------------------------------
 
+/// Rendered in place of a poisoned extension. Shows the type and node ID
+/// so the developer can identify which extension failed. The panic details
+/// (which method, the panic message) are logged at error level -- check
+/// stderr or RUST_LOG output for the full diagnostic.
 fn render_poisoned_placeholder<'a>(node: &TreeNode) -> Element<'a, Message> {
     use iced::Color;
     use iced::widget::text;
     text(format!(
-        "Extension error: type `{}`, node `{}`",
+        "Extension error: type `{}`, node `{}` (see logs)",
         node.type_name, node.id
     ))
     .color(Color::from_rgb(1.0, 0.0, 0.0))
