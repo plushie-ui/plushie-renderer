@@ -1537,6 +1537,27 @@ accessibility behaviour. All fields are optional.
 `description` from their `placeholder` prop. Explicit `a11y` values always
 take priority.
 
+### Widget-specific accessibility props
+
+Some widgets accept top-level props (outside the `a11y` object) that feed
+into accessibility output.
+
+| Widget | Prop | Type | Description |
+|--------|------|------|-------------|
+| `image` | `alt` | string | Accessible label (auto-populates `a11y.label`) |
+| `image` | `description` | string | Extended accessible description |
+| `image` | `decorative` | bool | When true, hides the image from assistive technology. Use for purely visual images that don't convey information. |
+| `svg` | `alt` | string | Accessible label (auto-populates `a11y.label`) |
+| `svg` | `description` | string | Extended accessible description |
+| `svg` | `decorative` | bool | When true, hides the SVG from assistive technology. Use for purely visual images that don't convey information. |
+| `slider` | `label` | string | Accessible label (e.g. `"Volume"`). Without this, screen readers announce the value without context. |
+| `vertical_slider` | `label` | string | Accessible label (e.g. `"Volume"`). Without this, screen readers announce the value without context. |
+| `progress_bar` | `label` | string | Accessible label (e.g. `"Upload progress"`). |
+| `qr_code` | `alt` | string | Accessible label for the QR code |
+| `qr_code` | `description` | string | Extended description |
+| `canvas` | `alt` | string | Accessible label for the canvas |
+| `canvas` | `description` | string | Extended description |
+
 ---
 
 ## Extended styling props

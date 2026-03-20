@@ -1105,6 +1105,9 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     if let Some(ss) = prop_f64(props, "shift_step") {
         s = s.shift_step(ss);
     }
+    if let Some(label) = prop_str(props, "label") {
+        s = s.label(label);
+    }
 
     // Rail styling props (applied on top of any style preset)
     let rail_color = prop_color(props, "rail_color");
@@ -1203,6 +1206,9 @@ pub(crate) fn render_vertical_slider<'a>(
     }
     if let Some(ss) = prop_f64(props, "shift_step") {
         s = s.shift_step(ss);
+    }
+    if let Some(label) = prop_str(props, "label") {
+        s = s.label(label);
     }
 
     // Rail styling props (applied on top of any style preset)

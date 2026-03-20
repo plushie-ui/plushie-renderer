@@ -158,6 +158,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("rail_width", Number),
             ("circular_handle", Bool),
             ("handle_radius", Number),
+            ("label", Str),
         ],
         "checkbox" => &[
             ("label", Str),
@@ -189,6 +190,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("height", Length),
             ("style", Any),
             ("vertical", Bool),
+            ("label", Str),
         ],
         "image" => &[
             ("source", Any),
@@ -203,6 +205,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("scale", Number),
             ("alt", Str),
             ("description", Str),
+            ("decorative", Bool),
             ("crop", Any),
         ],
         "svg" => &[
@@ -215,6 +218,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("color", Color),
             ("alt", Str),
             ("description", Str),
+            ("decorative", Bool),
         ],
         "scrollable" => &[
             ("width", Length),
@@ -388,6 +392,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("default", Number),
             ("rail_color", Color),
             ("rail_width", Number),
+            ("label", Str),
         ],
         "table" => &[
             ("columns", Array),
@@ -437,6 +442,8 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("on_release", Bool),
             ("on_move", Bool),
             ("on_scroll", Bool),
+            ("alt", Str),
+            ("description", Str),
         ],
         "qr_code" => &[
             ("data", Str),
@@ -444,6 +451,8 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("error_correction", Str),
             ("cell_color", Color),
             ("background_color", Color),
+            ("alt", Str),
+            ("description", Str),
         ],
         "window" => &[
             ("padding", Any),

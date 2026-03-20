@@ -294,6 +294,9 @@ pub(crate) fn render_image<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
     if let Some(desc) = prop_str(props, "description") {
         img = img.description(desc);
     }
+    if prop_bool_default(props, "decorative", false) {
+        img = img.decorative();
+    }
     // crop: {"x": u32, "y": u32, "width": u32, "height": u32}
     if let Some(crop_obj) = props
         .and_then(|p| p.get("crop"))
@@ -354,6 +357,9 @@ pub(crate) fn render_svg<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element
     }
     if let Some(desc) = prop_str(props, "description") {
         s = s.description(desc);
+    }
+    if prop_bool_default(props, "decorative", false) {
+        s = s.decorative();
     }
     if let Some(color_str) = prop_str(props, "color")
         && let Some(c) = crate::theming::parse_hex_color(&color_str)
@@ -434,6 +440,9 @@ pub(crate) fn render_progress_bar<'a>(
 
     if prop_bool_default(props, "vertical", false) {
         pb = pb.vertical();
+    }
+    if let Some(label) = prop_str(props, "label") {
+        pb = pb.label(label);
     }
 
     // Style: string name or style map object
@@ -630,7 +639,7 @@ pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
 
     let cache_entry = ctx.caches.qr_code_caches.get(&node.id);
 
-    canvas(QrCodeProgram {
+    let mut qr_canvas = canvas(QrCodeProgram {
         modules,
         cell_size,
         cell_color,
@@ -638,8 +647,16 @@ pub(crate) fn render_qr_code<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
         cache: cache_entry,
     })
     .width(Length::Fixed(pixel_size))
-    .height(Length::Fixed(pixel_size))
-    .into()
+    .height(Length::Fixed(pixel_size));
+
+    if let Some(alt) = prop_str(props, "alt") {
+        qr_canvas = qr_canvas.alt(alt);
+    }
+    if let Some(desc) = prop_str(props, "description") {
+        qr_canvas = qr_canvas.description(desc);
+    }
+
+    qr_canvas.into()
 }
 
 // ---------------------------------------------------------------------------

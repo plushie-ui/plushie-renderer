@@ -857,7 +857,7 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     // "interactive" is a convenience flag that enables all event handlers.
     let interactive = prop_bool_default(props, "interactive", false);
 
-    iced::widget::canvas(CanvasProgram {
+    let mut c = iced::widget::canvas(CanvasProgram {
         layers,
         caches: node_caches,
         background,
@@ -869,8 +869,16 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
         images: ctx.images,
     })
     .width(width)
-    .height(height)
-    .into()
+    .height(height);
+
+    if let Some(alt) = prop_str(props, "alt") {
+        c = c.alt(alt);
+    }
+    if let Some(desc) = prop_str(props, "description") {
+        c = c.description(desc);
+    }
+
+    c.into()
 }
 
 /// Parse an f32 from a JSON value by key, defaulting to 0.
