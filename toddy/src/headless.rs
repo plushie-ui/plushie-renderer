@@ -32,7 +32,7 @@ use serde::Serialize;
 
 use toddy_core::codec::Codec;
 use toddy_core::engine::Core;
-use toddy_core::extensions::{EventResult, ExtensionCaches, ExtensionDispatcher, RenderCtx};
+use toddy_core::extensions::{EventResult, ExtensionDispatcher, RenderCtx};
 use toddy_core::image_registry::ImageRegistry;
 use toddy_core::message::Message;
 use toddy_core::protocol::{IncomingMessage, OutgoingEvent, SessionMessage};
@@ -150,7 +150,6 @@ struct Session {
     core: Core,
     theme: Theme,
     dispatcher: ExtensionDispatcher,
-    ext_caches: ExtensionCaches,
     images: ImageRegistry,
     writer: WireWriter,
     /// Slider value tracking for SlideRelease (mirrors App.last_slide_values).
@@ -187,7 +186,6 @@ impl Session {
             core: Core::new(),
             theme: Theme::Dark,
             dispatcher,
-            ext_caches: ExtensionCaches::new(),
             images: ImageRegistry::new(),
             writer,
             last_slide_values: HashMap::new(),
@@ -388,8 +386,11 @@ impl Session {
                         }
                     }
                     if is_tree_change && let Some(root) = self.core.tree.root() {
-                        self.dispatcher
-                            .prepare_all(root, &mut self.ext_caches, &self.theme);
+                        self.dispatcher.prepare_all(
+                            root,
+                            &mut self.core.caches.extension,
+                            &self.theme,
+                        );
                     }
                 }
             }
@@ -463,9 +464,12 @@ impl Session {
                     ref data,
                     ref family,
                 } => {
-                    let result =
-                        self.dispatcher
-                            .handle_event(id, family, data, &mut self.ext_caches);
+                    let result = self.dispatcher.handle_event(
+                        id,
+                        family,
+                        data,
+                        &mut self.core.caches.extension,
+                    );
                     match result {
                         EventResult::PassThrough => {
                             let data_opt = if data.is_null() {
@@ -725,7 +729,8 @@ fn handle_message(
                     s.dispatcher.clear_poisoned();
                 }
                 if let Some(root) = s.core.tree.root() {
-                    s.dispatcher.prepare_all(root, &mut s.ext_caches, &s.theme);
+                    s.dispatcher
+                        .prepare_all(root, &mut s.core.caches.extension, &s.theme);
                 }
                 s.settle_ui();
             }
@@ -817,7 +822,7 @@ fn handle_message(
             handle_screenshot(s, session_id, id, name, w, h)?;
         }
         IncomingMessage::Reset { id } => {
-            s.dispatcher.reset(&mut s.ext_caches);
+            s.dispatcher.reset(&mut s.core.caches.extension);
             s.images = ImageRegistry::new();
             s.theme = Theme::Dark;
             s.last_slide_values.clear();
@@ -835,9 +840,9 @@ fn handle_message(
             op,
             payload,
         } => {
-            let events = s
-                .dispatcher
-                .handle_command(&node_id, &op, &payload, &mut s.ext_caches);
+            let events =
+                s.dispatcher
+                    .handle_command(&node_id, &op, &payload, &mut s.core.caches.extension);
             for event in events {
                 s.writer.emit(&event.with_session(session_id))?;
             }
@@ -848,7 +853,7 @@ fn handle_message(
                     &cmd.node_id,
                     &cmd.op,
                     &cmd.payload,
-                    &mut s.ext_caches,
+                    &mut s.core.caches.extension,
                 );
                 for event in events {
                     s.writer.emit(&event.with_session(session_id))?;
