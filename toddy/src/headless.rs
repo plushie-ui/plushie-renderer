@@ -1146,13 +1146,21 @@ fn run_multiplexed(
 
                     sessions.insert(session_id.clone(), tx.clone());
                     session_handles.push(handle);
+                    log::info!(
+                        "session '{}' created (active: {})",
+                        session_id,
+                        sessions.len()
+                    );
                     tx
                 };
 
                 // Send the message to the session thread.
                 if tx.send(sm.message).is_err() {
-                    log::error!("session '{session_id}' channel closed unexpectedly");
                     sessions.remove(&session_id);
+                    log::error!(
+                        "session '{session_id}' channel closed unexpectedly (active: {})",
+                        sessions.len()
+                    );
                     continue;
                 }
 
@@ -1164,6 +1172,10 @@ fn run_multiplexed(
                     // Drop the sender so the session thread exits after
                     // processing the Reset message.
                     sessions.remove(&session_id);
+                    log::info!(
+                        "session '{session_id}' reset (active: {})",
+                        sessions.len()
+                    );
                 }
             }
             Err(e) => {
