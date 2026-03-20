@@ -98,6 +98,10 @@ define_caches! {
     qr_code_caches: (u64, iced_canvas::Cache),
     /// Resolved themes for Themer widget nodes.
     themer_themes: iced::Theme,
+    /// Parsed style overrides with content hash for invalidation.
+    /// Populated in `ensure_caches_walk` for any node with a `style`
+    /// object prop; read during render to avoid re-parsing every frame.
+    style_overrides: (u64, super::helpers::StyleOverrides),
 }
 
 impl Default for WidgetCaches {
@@ -177,6 +181,11 @@ fn ensure_caches_walk(
         _ => {}
     }
 
+    // Cache parsed StyleOverrides for any node with a `style` object prop.
+    // Uses the same content-hash pattern as canvas/markdown: only re-parse
+    // when the JSON value changes.
+    ensure_style_overrides_cache(node, caches);
+
     for child in &node.children {
         ensure_caches_walk(child, caches, live_ids, depth + 1);
     }
@@ -210,6 +219,41 @@ pub(crate) fn canvas_layer_map(
     }
 
     map
+}
+
+/// Cache parsed `StyleOverrides` for a node's `style` prop. Only
+/// re-parses when the content hash of the JSON value changes.
+fn ensure_style_overrides_cache(node: &TreeNode, caches: &mut WidgetCaches) {
+    let style_val = match node.props.get("style").and_then(|v| v.as_object()) {
+        Some(obj) => obj,
+        None => return,
+    };
+
+    let mut hasher = DefaultHasher::new();
+    hash_json_value(&serde_json::Value::Object(style_val.clone()), &mut hasher);
+    let hash = hasher.finish();
+
+    if let Some((cached_hash, _)) = caches.style_overrides.get(&node.id)
+        && *cached_hash == hash
+    {
+        return;
+    }
+
+    let overrides = super::helpers::parse_style_overrides(style_val);
+    caches
+        .style_overrides
+        .insert(node.id.clone(), (hash, overrides));
+}
+
+/// Look up cached `StyleOverrides` for a node. Returns `None` if the
+/// node has no `style` prop or if `ensure_caches` hasn't run yet.
+/// Used by widget render functions to avoid re-parsing the style JSON
+/// on every frame.
+pub(crate) fn cached_style_overrides<'a>(
+    caches: &'a WidgetCaches,
+    node_id: &str,
+) -> Option<&'a super::helpers::StyleOverrides> {
+    caches.style_overrides.get(node_id).map(|(_, ov)| ov)
 }
 
 /// Hash a serde_json::Value recursively without allocating a serialized string.

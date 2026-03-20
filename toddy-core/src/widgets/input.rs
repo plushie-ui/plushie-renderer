@@ -145,7 +145,7 @@ pub(crate) fn render_text_input<'a>(
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             ti = ti.style(move |theme: &iced::Theme, status| {
                 let base_fn: fn(&iced::Theme, text_input::Status) -> text_input::Style =
                     match ov.preset_base.as_deref() {
@@ -550,7 +550,7 @@ pub(crate) fn render_text_editor<'a>(
                     }
                 }
             } else if let Some(obj) = style_val.as_object() {
-                let ov = parse_style_overrides(obj);
+                let ov = get_style_overrides(&node.id, obj, ctx.caches);
                 Some(Box::new(move |theme: &iced::Theme, status| {
                     let base_fn: fn(&iced::Theme, text_editor::Status) -> text_editor::Style =
                         match ov.preset_base.as_deref() {
@@ -774,7 +774,7 @@ pub(crate) fn render_checkbox<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Ele
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             cb = cb.style(move |theme: &iced::Theme, status| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("primary") => checkbox::primary(theme, status),
@@ -891,7 +891,7 @@ pub(crate) fn render_toggler<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             t = t.style(move |theme: &iced::Theme, status| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("default") => toggler::default(theme, status),
@@ -1012,7 +1012,7 @@ pub(crate) fn render_radio<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elemen
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             r = r.style(move |theme: &iced::Theme, status| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("default") => iced::widget::radio::default(theme, status),
@@ -1053,7 +1053,7 @@ fn apply_rail_overrides(
     }
 }
 
-pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_slider<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
     let value = prop_f64(props, "value").unwrap_or(*range.start());
@@ -1119,7 +1119,7 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elem
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             s = s.style(move |theme: &iced::Theme, status| {
                 let mut style = slider::default(theme, status);
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
@@ -1151,7 +1151,7 @@ pub(crate) fn render_slider<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elem
 
 pub(crate) fn render_vertical_slider<'a>(
     node: &'a TreeNode,
-    _ctx: RenderCtx<'a>,
+    ctx: RenderCtx<'a>,
 ) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f64(props);
@@ -1210,7 +1210,7 @@ pub(crate) fn render_vertical_slider<'a>(
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             s = s.style(move |theme: &iced::Theme, status| {
                 let mut style = vertical_slider::default(theme, status);
                 apply_slider_handle_fields(&mut style.handle, &ov.base);
@@ -1319,7 +1319,7 @@ pub(crate) fn render_pick_list<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             pl = pl.style(move |theme: &iced::Theme, status| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("default") => pick_list::default(theme, status),
@@ -1466,7 +1466,7 @@ pub(crate) fn render_combo_box<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             cb = cb.input_style(move |theme: &iced::Theme, status| {
                 let base_fn: fn(&iced::Theme, text_input::Status) -> text_input::Style =
                     match ov.preset_base.as_deref() {

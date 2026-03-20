@@ -409,7 +409,7 @@ pub(crate) fn render_markdown<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Ele
 
 pub(crate) fn render_progress_bar<'a>(
     node: &'a TreeNode,
-    _ctx: RenderCtx<'a>,
+    ctx: RenderCtx<'a>,
 ) -> Element<'a, Message> {
     let props = node.props.as_object();
     let range = prop_range_f32(props);
@@ -444,7 +444,7 @@ pub(crate) fn render_progress_bar<'a>(
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             pb = pb.style(move |theme: &iced::Theme| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("primary") => progress_bar::primary(theme),
@@ -467,7 +467,7 @@ pub(crate) fn render_progress_bar<'a>(
 // Rule (horizontal/vertical divider)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn render_rule<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Element<'a, Message> {
+pub(crate) fn render_rule<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Element<'a, Message> {
     let props = node.props.as_object();
     let direction = prop_str(props, "direction").unwrap_or_default();
 
@@ -502,7 +502,7 @@ pub(crate) fn render_rule<'a>(node: &'a TreeNode, _ctx: RenderCtx<'a>) -> Elemen
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             r = r.style(move |theme: &iced::Theme| {
                 let base_fn: fn(&iced::Theme) -> rule::Style = match ov.preset_base.as_deref() {
                     Some("default") => rule::default,

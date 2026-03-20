@@ -217,7 +217,7 @@ pub(crate) fn render_container<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> El
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             c = c.style(move |theme| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("transparent") => container::transparent(theme),

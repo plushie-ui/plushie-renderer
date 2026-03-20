@@ -80,7 +80,7 @@ pub(crate) fn render_button<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             b = b.style(move |theme: &iced::Theme, status| {
                 let mut style = match ov.preset_base.as_deref() {
                     Some("primary") => button::primary(theme, status),
@@ -303,7 +303,7 @@ pub(crate) fn render_tooltip<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Elem
                 }
             };
         } else if let Some(obj) = style_val.as_object() {
-            let ov = parse_style_overrides(obj);
+            let ov = get_style_overrides(&node.id, obj, ctx.caches);
             tt = tt.style(move |_theme| container_style_from_base(&ov.base));
         }
     }

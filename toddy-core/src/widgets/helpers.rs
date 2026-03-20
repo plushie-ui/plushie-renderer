@@ -485,6 +485,20 @@ pub(crate) struct StyleOverrides {
     pub(crate) focused: Option<StyleMapFields>,
 }
 
+/// Look up cached StyleOverrides for a node, falling back to parsing
+/// if the cache doesn't have an entry (shouldn't happen in practice
+/// since ensure_caches_walk populates it, but safe to fall back).
+pub(crate) fn get_style_overrides(
+    node_id: &str,
+    obj: &serde_json::Map<String, Value>,
+    caches: &super::WidgetCaches,
+) -> StyleOverrides {
+    if let Some(cached) = super::caches::cached_style_overrides(caches, node_id) {
+        return cached.clone();
+    }
+    parse_style_overrides(obj)
+}
+
 pub(crate) fn parse_style_overrides(obj: &serde_json::Map<String, Value>) -> StyleOverrides {
     StyleOverrides {
         base: parse_style_map_fields(obj),
