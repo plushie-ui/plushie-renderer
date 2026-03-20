@@ -2,8 +2,17 @@
 //! decorations, icon, queries (size, position, mode, scale factor), and
 //! window sync. Dispatched from [`CoreEffect::WindowOp`] via the `op`
 //! string, `window_id`, and JSON `settings`.
+//!
+//! ## Platform notes
+//!
+//! Several operations are no-ops on Wayland because the compositor owns
+//! window positioning, focus, and icon management. When the renderer
+//! detects Wayland (via `WAYLAND_DISPLAY`), it logs a one-time debug
+//! warning for these operations so SDK users can understand why their
+//! requests have no visible effect.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use base64::Engine as _;
 use iced::{Point, Size, Task, window};
@@ -12,6 +21,23 @@ use toddy_core::message::Message;
 
 use super::App;
 use super::emitters::{emit_effect_response, emit_query_response};
+
+/// Returns true if the current display server is Wayland.
+///
+/// Detected via the `WAYLAND_DISPLAY` environment variable, which is
+/// set by Wayland compositors. Cached in a `OnceLock` so the env
+/// lookup happens at most once per process.
+fn is_wayland() -> bool {
+    static IS_WAYLAND: OnceLock<bool> = OnceLock::new();
+    *IS_WAYLAND.get_or_init(|| std::env::var("WAYLAND_DISPLAY").is_ok())
+}
+
+/// Log a debug warning when a window operation is a known no-op on Wayland.
+fn warn_wayland_noop(op: &str) {
+    if is_wayland() {
+        log::debug!("{op}: no-op on Wayland (compositor-controlled)");
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Window operations (impl App)
@@ -144,6 +170,7 @@ impl App {
                 }
             }
             "move" => {
+                warn_wayland_noop("move");
                 if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let x = settings.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                     let y = settings.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
@@ -199,6 +226,7 @@ impl App {
                 }
             }
             "gain_focus" => {
+                warn_wayland_noop("gain_focus");
                 if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     window::gain_focus(iced_id)
                 } else {
@@ -484,6 +512,7 @@ impl App {
             // - Linux: 32x32 or 48x48 (depends on WM/DE)
             // All platforms: square, power-of-two dimensions recommended.
             "set_icon" => {
+                warn_wayland_noop("set_icon");
                 if let Some(&iced_id) = self.windows.get_iced(window_id) {
                     let icon_data_b64 = settings
                         .get("icon_data")
@@ -823,6 +852,13 @@ fn parse_window_level(s: &str) -> window::Level {
     }
 }
 
+/// Parse a window mode from a JSON value.
+///
+/// Supported modes: `"windowed"` (default), `"fullscreen"`, `"hidden"`.
+///
+/// Note: `"fullscreen"` maps to borderless windowed fullscreen (not
+/// exclusive fullscreen). This is the iced default and provides better
+/// multi-monitor behavior and faster alt-tab than exclusive mode.
 fn parse_window_mode(v: &serde_json::Value) -> window::Mode {
     match v.get("mode").and_then(|v| v.as_str()).unwrap_or("windowed") {
         "fullscreen" => window::Mode::Fullscreen,

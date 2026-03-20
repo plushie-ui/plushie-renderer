@@ -1091,7 +1091,22 @@ fn run_multiplexed(
     drop(writer_tx);
 
     for handle in session_handles {
-        let _ = handle.join();
+        if let Err(payload) = handle.join() {
+            // Extract a useful message from the panic payload.
+            let msg = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("(non-string panic)");
+            log::error!("session thread panicked: {msg}");
+        }
     }
-    let _ = writer_handle.join();
+    if let Err(payload) = writer_handle.join() {
+        let msg = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("(non-string panic)");
+        log::error!("writer thread panicked: {msg}");
+    }
 }
