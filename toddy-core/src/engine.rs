@@ -222,7 +222,18 @@ impl Core {
                 if let Some(theme_val) = tree.props.get("theme") {
                     self.resolve_and_cache_theme(theme_val, &mut effects);
                 }
-                self.tree.snapshot(tree);
+                if let Err(duplicates) = self.tree.snapshot(tree) {
+                    let dup_list = duplicates.join(", ");
+                    log::error!("snapshot contains duplicate node IDs: {dup_list}");
+                    effects.push(CoreEffect::EmitEvent(OutgoingEvent::generic(
+                        "error".to_string(),
+                        "duplicate_node_ids".to_string(),
+                        Some(serde_json::json!({
+                            "error": "snapshot contains duplicate node IDs",
+                            "duplicates": duplicates,
+                        })),
+                    )));
+                }
                 // Clear built-in caches but NOT extension caches. Extension
                 // cleanup callbacks run later via prepare_all() in the host,
                 // which needs the old cache entries to still be accessible.
@@ -749,6 +760,40 @@ mod tests {
 
         let ids = core.tree.window_ids();
         assert_eq!(ids.len(), 3);
+    }
+
+    // -- Duplicate node ID detection --
+
+    #[test]
+    fn snapshot_with_duplicate_ids_emits_error_event() {
+        let mut core = Core::new();
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("dupe", "text"));
+        root.children.push(make_node("dupe", "button"));
+
+        let effects = core.apply(IncomingMessage::Snapshot { tree: root });
+        let has_error = effects.iter().any(|e| match e {
+            CoreEffect::EmitEvent(ev) => ev.family == "error",
+            _ => false,
+        });
+        assert!(has_error, "duplicate IDs should produce an error event");
+        // Tree should still be accepted
+        assert!(core.tree.root().is_some());
+    }
+
+    #[test]
+    fn snapshot_without_duplicates_has_no_error_event() {
+        let mut core = Core::new();
+        let mut root = make_node("root", "column");
+        root.children.push(make_node("a", "text"));
+        root.children.push(make_node("b", "button"));
+
+        let effects = core.apply(IncomingMessage::Snapshot { tree: root });
+        let has_error = effects.iter().any(|e| match e {
+            CoreEffect::EmitEvent(ev) => ev.family == "error",
+            _ => false,
+        });
+        assert!(!has_error, "unique IDs should not produce an error event");
     }
 }
 
