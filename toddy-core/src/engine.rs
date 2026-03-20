@@ -173,7 +173,13 @@ impl Core {
         use sha2::{Digest, Sha256};
         match &self.tree.root() {
             Some(root) => {
-                let json = serde_json::to_string(root).unwrap_or_default();
+                let json = match serde_json::to_string(root) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("tree_hash: serialization failed: {e}");
+                        return "SERIALIZATION_ERROR".to_string();
+                    }
+                };
                 let hash = Sha256::digest(json.as_bytes());
                 format!("{:x}", hash)
             }
