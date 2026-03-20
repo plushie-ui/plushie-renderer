@@ -256,21 +256,49 @@ pub(crate) fn parse_canvas_stroke(value: &Value) -> canvas::Stroke<'static> {
     stroke
 }
 
+/// Maximum number of unique dash patterns cached. Beyond this limit,
+/// new patterns are still leaked (LineDash requires `'static` segments)
+/// but not inserted into the cache, bounding the HashMap's memory.
+const MAX_DASH_CACHE: usize = 1024;
+
 /// Intern a dash segment array so that identical patterns share one
 /// leaked allocation. Without this, every re-render of a dashed stroke
 /// leaked a fresh `Box<[f32]>` via `Box::leak`.
+///
+/// When the cache reaches [`MAX_DASH_CACHE`] entries, new unique
+/// patterns still get a leaked slice (LineDash requires `'static`
+/// segments) but are not inserted into the cache. A one-time warning
+/// is logged when this limit is hit.
 fn intern_dash_segments(segments: Vec<f32>) -> &'static [f32] {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{LazyLock, Mutex};
 
     static CACHE: LazyLock<Mutex<HashMap<Vec<u32>, &'static [f32]>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
+    static WARNED: AtomicBool = AtomicBool::new(false);
 
     let key: Vec<u32> = segments.iter().map(|s| s.to_bits()).collect();
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    cache
-        .entry(key)
-        .or_insert_with(|| Box::leak(segments.into_boxed_slice()))
+
+    if let Some(existing) = cache.get(&key) {
+        return existing;
+    }
+
+    let leaked: &'static [f32] = Box::leak(segments.into_boxed_slice());
+
+    if cache.len() >= MAX_DASH_CACHE {
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "dash segment cache full ({MAX_DASH_CACHE} entries); \
+                 new patterns will leak without caching"
+            );
+        }
+        return leaked;
+    }
+
+    cache.insert(key, leaked);
+    leaked
 }
 
 /// Build a Path from an array of path commands.
