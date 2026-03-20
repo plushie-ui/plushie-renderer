@@ -977,16 +977,18 @@ impl Default for ExtensionDispatcher {
 /// impl canvas::Program<Message> for MyProgram {
 ///     type State = MyState;
 ///
-///     fn draw(&self, state: &mut MyState, ...) -> Vec<Geometry> {
-///         // 1. Compare: has the data changed since the last draw?
+///     // update() has &mut State -- clear the cache here when data changes.
+///     fn update(&self, state: &mut MyState, ...) -> Option<Action<Message>> {
 ///         if state.generation != self.current_generation {
-///             // 2. Clear the cached geometry so it's redrawn.
 ///             state.cache.clear();
-///             // 3. Record the current generation so we don't clear again
-///             //    until the next bump().
 ///             state.generation = self.current_generation;
 ///         }
-///         // 4. Draw (cache.draw reuses geometry if not cleared above).
+///         None
+///     }
+///
+///     // draw() has &State -- the cache handles re-tessellation automatically
+///     // when cleared above.
+///     fn draw(&self, state: &MyState, ...) -> Vec<Geometry> {
 ///         vec![state.cache.draw(renderer, bounds.size(), |frame| { ... })]
 ///     }
 /// }

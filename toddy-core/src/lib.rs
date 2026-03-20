@@ -11,29 +11,16 @@
 //!
 //! ## Module guide
 //!
-//! **Core engine:**
-//! - [`engine`] -- `Core` struct: pure state management decoupled from iced runtime
-//! - [`tree`] -- tree data structure, patch application, window discovery
-//! - [`message`] -- `Message` enum, keyboard/mouse serialization helpers
-//!
-//! **Widgets:**
-//! - [`widgets`] -- tree node to iced widget rendering (all widget types)
-//! - [`widgets::overlay`] -- custom `Widget` + `Overlay` impl for positioned overlays
-//!
-//! **Protocol:**
-//! - [`protocol`] -- wire message parsing and event serialization
-//! - [`codec`] -- wire codec: JSON + MessagePack encode/decode/framing
-//!
-//! **Platform:**
-//! - [`theming`] -- theme resolution, custom palette parsing, hex colors
-//! - [`image_registry`] -- in-memory image handle storage
-//!
-//! **Extension SDK:**
+//! **Extension SDK (stable API):**
+//! - [`prelude`] -- common re-exports for extension authors
 //! - [`extensions`] -- `WidgetExtension` trait, `ExtensionDispatcher`, `ExtensionCaches`
 //! - [`app`] -- `ToddyAppBuilder` for registering extensions
-//! - [`prelude`] -- common re-exports for extension authors
 //! - [`prop_helpers`] -- public prop extraction helpers for extension authors
 //! - [`testing`] -- test factory helpers for extension authors
+//!
+//! **Internal modules** (used by the toddy binary, not part of the SDK):
+//! `engine`, `tree`, `message`, `widgets`, `protocol`, `codec`,
+//! `theming`, `image_registry`
 
 #![deny(warnings)]
 
