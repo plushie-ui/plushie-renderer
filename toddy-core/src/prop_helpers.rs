@@ -24,6 +24,16 @@ use crate::theming::parse_hex_color;
 /// the node has no props (e.g. `Value::Null`).
 pub type Props<'a> = Option<&'a serde_json::Map<String, Value>>;
 
+/// Safely narrow an f64 to f32, clamping values outside f32's range
+/// instead of silently producing infinity.
+///
+/// For UI property values (dimensions, colors, text sizes) the f64 values
+/// from JSON are always within f32 range, so this is pure defense-in-depth.
+#[inline]
+pub fn f64_to_f32(v: f64) -> f32 {
+    v.clamp(f32::MIN as f64, f32::MAX as f64) as f32
+}
+
 // ---------------------------------------------------------------------------
 // Core prop helpers
 // ---------------------------------------------------------------------------
@@ -45,7 +55,7 @@ pub fn prop_f32(props: Props<'_>, key: &str) -> Option<f32> {
     let val = props?.get(key)?;
     match val {
         Value::Number(n) => match n.as_f64() {
-            Some(f) => Some(f as f32),
+            Some(f) => Some(f64_to_f32(f)),
             None => {
                 log::trace!("prop '{}': number failed f64 conversion: {:?}", key, val);
                 None
@@ -232,8 +242,8 @@ pub fn prop_range_f32(props: Props<'_>) -> std::ops::RangeInclusive<f32> {
         .and_then(|p| p.get("range"))
         .and_then(|v| v.as_array())
         .and_then(|arr| {
-            let min = arr.first()?.as_f64()? as f32;
-            let max = arr.get(1)?.as_f64()? as f32;
+            let min = f64_to_f32(arr.first()?.as_f64()?);
+            let max = f64_to_f32(arr.get(1)?.as_f64()?);
             Some(min..=max)
         })
         .unwrap_or(0.0..=100.0)
@@ -273,7 +283,7 @@ pub fn prop_f32_array(props: Props<'_>, key: &str) -> Option<Vec<f32>> {
             let mut result = Vec::with_capacity(arr.len());
             for (i, v) in arr.iter().enumerate() {
                 match v.as_f64() {
-                    Some(f) => result.push(f as f32),
+                    Some(f) => result.push(f64_to_f32(f)),
                     None => {
                         log::warn!(
                             "prop '{}': dropping non-numeric element at index {}: {:?}",
@@ -336,7 +346,7 @@ pub fn value_to_length(val: &Value) -> Option<Length> {
     match val {
         Value::Number(n) => n
             .as_f64()
-            .map(|v| v as f32)
+            .map(f64_to_f32)
             .filter(|v| *v >= 0.0)
             .map(Length::Fixed),
         Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {

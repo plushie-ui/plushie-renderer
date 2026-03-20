@@ -314,7 +314,7 @@ impl Core {
                 self.default_text_size = settings
                     .get("default_text_size")
                     .and_then(|v| v.as_f64())
-                    .map(|v| v as f32);
+                    .map(crate::prop_helpers::f64_to_f32);
                 self.default_font = settings.get("default_font").map(|v| {
                     let family = v.get("family").and_then(|f| f.as_str());
                     match family {

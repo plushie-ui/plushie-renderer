@@ -107,7 +107,7 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
                 settings
                     .get("scale_factor")
                     .and_then(|v| v.as_f64())
-                    .map(|v| v as f32)
+                    .map(toddy_core::prop_helpers::f64_to_f32)
                     .unwrap_or(1.0),
             );
 
