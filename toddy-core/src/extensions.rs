@@ -824,7 +824,8 @@ impl ExtensionDispatcher {
                 Err(panic) => {
                     let msg = panic_message(&panic);
                     log::error!(
-                        "extension `{}` panicked in handle_event: {msg}",
+                        "extension `{}` panicked in handle_event \
+                         (node_id={id}, family={family}): {msg}",
                         self.extensions[ext_idx].config_key()
                     );
                     self.poisoned[ext_idx] = true;
