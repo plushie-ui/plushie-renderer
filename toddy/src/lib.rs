@@ -23,6 +23,7 @@ mod headless;
 mod message_processing;
 mod renderer;
 mod scripting;
+pub(crate) mod transport;
 
 /// Entry point for the toddy renderer.
 ///
