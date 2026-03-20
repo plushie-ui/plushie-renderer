@@ -5,6 +5,7 @@
 //! encodes via the global [`Codec`] and writes to stdout.
 
 use std::io::{self, Write};
+use std::sync::{Mutex, OnceLock};
 
 use iced::Task;
 
@@ -13,22 +14,38 @@ use toddy_core::message::Message;
 use toddy_core::protocol::OutgoingEvent;
 
 // ---------------------------------------------------------------------------
-// stdout write helper
+// configurable output writer
 // ---------------------------------------------------------------------------
 
-/// Write pre-encoded bytes to stdout, returning any I/O error to the
-/// caller (including broken pipe). The caller decides whether to shut
-/// down or log-and-continue.
+static OUTPUT_WRITER: OnceLock<Mutex<Box<dyn Write + Send>>> = OnceLock::new();
+
+/// Initialize the global output writer. Must be called once at startup.
+pub(crate) fn init_output(writer: Box<dyn Write + Send>) {
+    if OUTPUT_WRITER.set(Mutex::new(writer)).is_err() {
+        panic!("output writer already initialized");
+    }
+}
+
+/// Write bytes to the protocol output channel (stdout or transport writer).
 ///
-/// Each call acquires the stdout lock and flushes. This is correct for
+/// Each call acquires the writer lock and flushes. This is correct for
 /// the common case (one event per update cycle) but suboptimal when
 /// apply() produces multiple effects. A future optimization could batch
 /// writes within apply() using a single lock/flush cycle.
-pub(crate) fn write_stdout(bytes: &[u8]) -> io::Result<()> {
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    handle.write_all(bytes)?;
-    handle.flush()
+///
+/// Falls back to direct stdout if the global writer has not been
+/// initialized yet (only possible during very early startup errors).
+pub(crate) fn write_output(bytes: &[u8]) -> io::Result<()> {
+    if let Some(writer) = OUTPUT_WRITER.get() {
+        let mut guard = writer.lock().unwrap_or_else(|e| e.into_inner());
+        guard.write_all(bytes)?;
+        guard.flush()
+    } else {
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        handle.write_all(bytes)?;
+        handle.flush()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +69,7 @@ pub(crate) fn emit_or_exit(event: OutgoingEvent) -> Task<Message> {
 pub(crate) fn emit_event(event: OutgoingEvent) -> io::Result<()> {
     let codec = Codec::get_global();
     let bytes = codec.encode(&event).map_err(io::Error::other)?;
-    write_stdout(&bytes)
+    write_output(&bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +96,7 @@ pub(crate) fn emit_hello(mode: &str, backend: &str, extensions: &[&str]) -> io::
     });
     let codec = Codec::get_global();
     let bytes = codec.encode(&msg).map_err(io::Error::other)?;
-    write_stdout(&bytes)
+    write_output(&bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +110,7 @@ pub(crate) fn emit_effect_response(
 ) -> io::Result<()> {
     let codec = Codec::get_global();
     let bytes = codec.encode(&response).map_err(io::Error::other)?;
-    write_stdout(&bytes)
+    write_output(&bytes)
 }
 
 /// Emit a query_response message to stdout. Used for system-level queries
@@ -112,7 +129,7 @@ pub(crate) fn emit_query_response(
     });
     let codec = Codec::get_global();
     let bytes = codec.encode(&msg).map_err(io::Error::other)?;
-    write_stdout(&bytes)
+    write_output(&bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +167,7 @@ pub(crate) fn emit_screenshot_response(
     let bytes = codec
         .encode_binary_message(map, binary)
         .map_err(io::Error::other)?;
-    write_stdout(&bytes)
+    write_output(&bytes)
 }
 
 // ---------------------------------------------------------------------------

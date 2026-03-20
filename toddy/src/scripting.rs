@@ -10,7 +10,7 @@
 //! live here. Both the daemon renderer and headless mode use them to translate
 //! scripting protocol interactions into iced events.
 
-use std::io::{self, Write};
+use std::io;
 
 use iced::keyboard::{self, Key, Modifiers};
 use iced::mouse;
@@ -328,14 +328,11 @@ pub(crate) fn interaction_to_iced_events(
 // Wire I/O
 // ---------------------------------------------------------------------------
 
-/// Write a serialized response to stdout using the negotiated wire codec.
+/// Write a serialized response using the negotiated wire codec.
 pub(crate) fn emit_wire<T: serde::Serialize>(value: &T) -> io::Result<()> {
     let codec = Codec::get_global();
     let bytes = codec.encode(value).map_err(io::Error::other)?;
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    handle.write_all(&bytes)?;
-    handle.flush()
+    crate::renderer::write_output(&bytes)
 }
 
 // ---------------------------------------------------------------------------

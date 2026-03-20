@@ -1,7 +1,7 @@
 //! Stdin I/O: initial settings reader, background reader thread, and
 //! the iced subscription that bridges stdin events into the update loop.
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use std::sync::Mutex;
 use std::thread;
 
@@ -13,16 +13,16 @@ use toddy_core::codec::Codec;
 use toddy_core::message::StdinEvent;
 use toddy_core::protocol::IncomingMessage;
 
-/// Emit an error message to stdout and exit the process. Used for
-/// fatal startup failures (decode error, protocol version mismatch)
-/// where the daemon cannot proceed.
+/// Emit an error message to the output channel and exit the process.
+/// Used for fatal startup failures (decode error, protocol version
+/// mismatch) where the daemon cannot proceed.
 fn startup_exit(codec: &Codec, message: &str) -> ! {
     log::error!("{message}");
     let error = serde_json::json!({"type": "error", "message": message});
     if let Ok(bytes) = codec.encode(&error) {
-        let mut out = io::stdout().lock();
-        let _ = out.write_all(&bytes);
-        let _ = out.flush();
+        // write_output falls back to stdout if init_output hasn't been
+        // called yet, so this is safe at any point during startup.
+        let _ = super::emitters::write_output(&bytes);
     }
     std::process::exit(1);
 }
