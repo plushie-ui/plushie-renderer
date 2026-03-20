@@ -66,12 +66,20 @@ impl OutgoingEvent {
 }
 
 /// Serializable representation of keyboard modifiers.
-#[derive(Debug, Serialize)]
+///
+/// All fields default to `false`, so partial JSON like `{"shift": true}`
+/// deserializes correctly with unset modifiers left as `false`.
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 pub struct KeyModifiers {
+    #[serde(default)]
     pub shift: bool,
+    #[serde(default)]
     pub ctrl: bool,
+    #[serde(default)]
     pub alt: bool,
+    #[serde(default)]
     pub logo: bool,
+    #[serde(default)]
     pub command: bool,
 }
 
@@ -604,19 +612,31 @@ impl OutgoingEvent {
     // -----------------------------------------------------------------------
 
     /// Key press event from scripting (no full KeyEventData).
+    ///
+    /// Produces the same event shape as real key_press events: `key` in
+    /// `data.key`, modifiers in the top-level `modifiers` field. Missing
+    /// modifier fields default to `false`.
     pub fn scripting_key_press(key: String, modifiers_json: Value) -> Self {
+        let mods: KeyModifiers =
+            serde_json::from_value(modifiers_json).unwrap_or(KeyModifiers::default());
         Self {
-            value: Some(Value::String(key)),
-            data: Some(serde_json::json!({"modifiers": modifiers_json})),
+            modifiers: Some(mods),
+            data: Some(serde_json::json!({"key": key})),
             ..Self::bare("key_press", String::new())
         }
     }
 
     /// Key release event from scripting (no full KeyEventData).
+    ///
+    /// Produces the same event shape as real key_release events: `key` in
+    /// `data.key`, modifiers in the top-level `modifiers` field. Missing
+    /// modifier fields default to `false`.
     pub fn scripting_key_release(key: String, modifiers_json: Value) -> Self {
+        let mods: KeyModifiers =
+            serde_json::from_value(modifiers_json).unwrap_or(KeyModifiers::default());
         Self {
-            value: Some(Value::String(key)),
-            data: Some(serde_json::json!({"modifiers": modifiers_json})),
+            modifiers: Some(mods),
+            data: Some(serde_json::json!({"key": key})),
             ..Self::bare("key_release", String::new())
         }
     }
@@ -1698,5 +1718,16 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["result"]["files"][0], "/a.txt");
         assert_eq!(json["result"]["files"][1], "/b.txt");
+    }
+
+    #[test]
+    fn effect_response_cancelled() {
+        let resp = EffectResponse::cancelled("e5".to_string());
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["type"], "effect_response");
+        assert_eq!(json["id"], "e5");
+        assert_eq!(json["status"], "cancelled");
+        assert!(json.get("result").is_none());
+        assert!(json.get("error").is_none());
     }
 }
