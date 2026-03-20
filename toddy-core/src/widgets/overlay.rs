@@ -24,6 +24,19 @@ pub(crate) enum Position {
 
 /// A widget that renders its anchor child normally and displays its overlay
 /// child as an iced overlay positioned relative to the anchor.
+///
+/// # Focus and accessibility
+///
+/// Both the anchor and content children participate in `operate()` so
+/// that focus cycling (Tab/Shift+Tab) can reach widgets inside the
+/// overlay content and the accessibility tree includes both subtrees.
+///
+/// When `a11y.modal = true` is set on the overlay node, the host is
+/// responsible for focus trapping (restricting Tab navigation to the
+/// overlay content). toddy does not implement iced-level focus
+/// interception, so modal overlays rely on the host SDK to manage
+/// focus boundaries -- typically by intercepting focus_next/focus_previous
+/// events and redirecting focus back into the overlay.
 pub(crate) struct OverlayWrapper<'a> {
     anchor: Element<'a, Message>,
     content: Element<'a, Message>,
@@ -198,9 +211,20 @@ impl Widget<Message, iced::Theme, iced::Renderer> for OverlayWrapper<'_> {
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
+        // Forward to the anchor child (the widget the overlay is attached to).
         self.anchor
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
+
+        // Forward to the content child so overlay widgets participate in
+        // focus cycling and the accessibility tree. The content child uses
+        // the anchor layout as a stand-in here; its true position is
+        // determined by the overlay system during rendering. This ensures
+        // that operations like focus_next and accessible tree traversal
+        // include widgets inside the overlay content.
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[1], layout, renderer, operation);
     }
 }
 
