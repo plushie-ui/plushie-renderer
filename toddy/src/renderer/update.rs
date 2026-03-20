@@ -159,9 +159,7 @@ impl App {
             // -- System / animation --
             Message::AnimationFrame(instant) => {
                 if let Some(tag) = self.core.active_subscriptions.get(SUB_ANIMATION_FRAME) {
-                    use std::sync::OnceLock;
-                    static EPOCH: OnceLock<iced::time::Instant> = OnceLock::new();
-                    let epoch = *EPOCH.get_or_init(|| instant);
+                    let epoch = *self.animation_epoch.get_or_insert(instant);
                     let millis = instant.duration_since(epoch).as_millis();
                     emitters::emit_or_exit(OutgoingEvent::animation_frame(tag.clone(), millis))
                 } else {
@@ -250,6 +248,7 @@ impl App {
                         self.scale_factor = 1.0;
                         self.last_slide_values.clear();
                         self.pending_tasks.clear();
+                        self.animation_epoch = None;
 
                         Task::batch(close_tasks)
                     }

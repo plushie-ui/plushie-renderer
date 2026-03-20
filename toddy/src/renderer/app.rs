@@ -58,6 +58,10 @@ pub(super) struct App {
     pub(super) last_slide_values: HashMap<String, f64>,
     /// Extension dispatcher for custom widget types.
     pub(super) dispatcher: ExtensionDispatcher,
+    /// Epoch for animation_frame timestamp calculation. Initialized on
+    /// the first AnimationFrame and cleared on Reset so the next
+    /// animation starts from zero.
+    pub(super) animation_epoch: Option<iced::time::Instant>,
 }
 
 impl App {
@@ -73,6 +77,7 @@ impl App {
             scale_factor: 1.0,
             last_slide_values: HashMap::new(),
             dispatcher,
+            animation_epoch: None,
         }
     }
 
