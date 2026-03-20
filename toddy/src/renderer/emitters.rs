@@ -83,7 +83,12 @@ pub(crate) fn emit_event(event: OutgoingEvent) -> io::Result<()> {
 /// `backend` identifies the rendering backend: `"wgpu"` for windowed,
 /// `"tiny-skia"` for headless, `"none"` for mock.
 /// `extensions` lists the config keys of registered extensions.
-pub(crate) fn emit_hello(mode: &str, backend: &str, extensions: &[&str]) -> io::Result<()> {
+pub(crate) fn emit_hello(
+    mode: &str,
+    backend: &str,
+    extensions: &[&str],
+    transport: &str,
+) -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "hello",
         "session": "",
@@ -92,6 +97,7 @@ pub(crate) fn emit_hello(mode: &str, backend: &str, extensions: &[&str]) -> io::
         "name": "toddy",
         "mode": mode,
         "backend": backend,
+        "transport": transport,
         "extensions": extensions,
     });
     let codec = Codec::get_global();

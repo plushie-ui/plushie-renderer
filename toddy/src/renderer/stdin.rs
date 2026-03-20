@@ -1,7 +1,7 @@
 //! Stdin I/O: initial settings reader, background reader thread, and
 //! the iced subscription that bridges stdin events into the update loop.
 
-use std::io::{self, BufRead};
+use std::io::{BufRead, BufReader, Read};
 use std::sync::Mutex;
 use std::thread;
 
@@ -12,6 +12,9 @@ use serde_json::Value;
 use toddy_core::codec::Codec;
 use toddy_core::message::StdinEvent;
 use toddy_core::protocol::IncomingMessage;
+
+/// The generic reader type used throughout the transport layer.
+pub(crate) type TransportReader = BufReader<Box<dyn Read + Send>>;
 
 /// Emit an error message to the output channel and exit the process.
 /// Used for fatal startup failures (decode error, protocol version
@@ -31,13 +34,8 @@ fn startup_exit(codec: &Codec, message: &str) -> ! {
 /// Returns empty settings, default iced config, no fonts, and the
 /// reader (so the caller can still spawn the stdin thread).
 fn empty_settings(
-    reader: io::BufReader<io::Stdin>,
-) -> (
-    Value,
-    iced::Settings,
-    Vec<Vec<u8>>,
-    io::BufReader<io::Stdin>,
-) {
+    reader: TransportReader,
+) -> (Value, iced::Settings, Vec<Vec<u8>>, TransportReader) {
     (
         Value::Object(Default::default()),
         iced::Settings::default(),
@@ -73,7 +71,7 @@ pub(crate) fn stdin_subscription() -> impl iced::futures::Stream<Item = StdinEve
 
 pub(crate) fn spawn_stdin_reader(
     sender: tokio::sync::mpsc::Sender<StdinEvent>,
-    mut reader: io::BufReader<io::Stdin>,
+    mut reader: TransportReader,
 ) {
     thread::spawn(move || {
         let codec = Codec::get_global();
@@ -111,25 +109,14 @@ pub(crate) fn spawn_stdin_reader(
 // Initial settings reader
 // ---------------------------------------------------------------------------
 
-/// Read the first message from stdin synchronously, expecting a Settings message.
+/// Read the first message synchronously, expecting a Settings message.
 /// Determines the wire codec (from CLI flag or auto-detection) and stores it in
 /// the global wire codec. Returns the settings Value, iced Settings, font bytes, and
 /// the buffered reader (to be handed off to the stdin reader thread).
 pub(crate) fn read_initial_settings(
     forced_codec: Option<Codec>,
-) -> (
-    Value,
-    iced::Settings,
-    Vec<Vec<u8>>,
-    io::BufReader<io::Stdin>,
-) {
-    // 64 KiB buffer is generous for the initial Settings message (typically
-    // < 4 KiB). The background reader thread uses the same reader after
-    // handoff, so this capacity also serves ongoing message reads.
-    // BufReader's default (8 KiB) would work but the larger buffer reduces
-    // syscall frequency for msgpack streams with many small messages.
-    let mut reader = io::BufReader::with_capacity(64 * 1024, io::stdin());
-
+    mut reader: TransportReader,
+) -> (Value, iced::Settings, Vec<Vec<u8>>, TransportReader) {
     // Determine codec: forced by CLI flag, or auto-detected from first byte.
     //
     // Auto-detect peeks at the first byte via fill_buf() (which blocks until

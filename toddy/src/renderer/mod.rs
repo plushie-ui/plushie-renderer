@@ -20,7 +20,7 @@ mod stdin;
 mod widget_ops;
 mod window_ops;
 
-pub(crate) use emitters::{emit_hello, init_output, write_output};
+pub(crate) use emitters::{emit_hello, write_output};
 pub(crate) use run::run;
 
 use app::App;

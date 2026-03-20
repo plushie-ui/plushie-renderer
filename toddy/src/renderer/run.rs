@@ -14,12 +14,6 @@ use super::emitters::emit_hello;
 use super::stdin::{STDIN_RX, read_initial_settings, spawn_stdin_reader};
 
 pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
-    // On Windows, stdin/stdout default to text mode which translates
-    // \n <-> \r\n. This corrupts MessagePack framing and length-prefixed
-    // binary data. Switch to binary mode before any I/O.
-    #[cfg(windows)]
-    set_binary_mode();
-
     let args: Vec<String> = std::env::args().collect();
 
     // Levelled logging via RUST_LOG. Default: warn (quiet). Use
@@ -44,6 +38,34 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
         .unwrap_or(1)
         .max(1);
 
+    // Parse --exec <command> for transport selection.
+    let exec_command = args
+        .windows(2)
+        .find(|w| w[0] == "--exec")
+        .map(|w| w[1].clone());
+
+    // Create transport: exec if --exec is present, otherwise stdio.
+    let transport = if let Some(cmd) = &exec_command {
+        match crate::transport::Transport::exec(cmd) {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("failed to start exec transport: {e}");
+                return Ok(());
+            }
+        }
+    } else {
+        // Windows binary mode only needed for stdio transport.
+        #[cfg(windows)]
+        set_binary_mode();
+        crate::transport::Transport::stdio()
+    };
+
+    let transport_name = transport.name();
+    let (reader, writer, _transport_guard) = transport.into_parts();
+
+    // Initialize the global output writer before any protocol I/O.
+    crate::renderer::emitters::init_output(writer);
+
     // Collect extension keys before building the dispatcher so the hello
     // message can include them in all modes.
     let ext_keys = builder
@@ -59,6 +81,8 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
             crate::headless::Mode::Mock,
             max_sessions,
             &ext_keys,
+            transport_name,
+            reader,
         );
         return Ok(());
     }
@@ -69,6 +93,8 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
             crate::headless::Mode::Headless,
             max_sessions,
             &ext_keys,
+            transport_name,
+            reader,
         );
         return Ok(());
     }
@@ -76,12 +102,13 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
     // Read the first message synchronously to get iced settings and font
     // data before the daemon starts. This must happen before the stdin
     // reader thread is spawned.
-    let (initial_settings, iced_settings, font_bytes, reader) = read_initial_settings(forced_codec);
+    let (initial_settings, iced_settings, font_bytes, reader) =
+        read_initial_settings(forced_codec, reader);
 
     // Send the hello handshake before any other output. The codec is set
     // inside read_initial_settings, so it's safe to emit framed messages now.
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = emit_hello("windowed", "wgpu", &ext_key_refs) {
+    if let Err(e) = emit_hello("windowed", "wgpu", &ext_key_refs, transport_name) {
         log::error!("failed to emit hello: {e}");
         return Ok(());
     }

@@ -21,7 +21,7 @@
 //! Each session is fully isolated (own Core, caches, extensions, UI).
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write as _};
+use std::io::{self, BufRead, BufReader, Read};
 use std::sync::mpsc;
 use std::thread;
 
@@ -112,12 +112,7 @@ impl WireWriter {
 
     fn write_bytes(&self, bytes: &[u8]) -> io::Result<()> {
         match &self.inner {
-            WriterInner::Stdout => {
-                let stdout = io::stdout();
-                let mut handle = stdout.lock();
-                handle.write_all(bytes)?;
-                handle.flush()
-            }
+            WriterInner::Stdout => crate::renderer::write_output(bytes),
             WriterInner::Channel(tx) => tx
                 .send(bytes.to_vec())
                 .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "writer channel closed")),
@@ -890,10 +885,9 @@ pub(crate) fn run(
     mode: Mode,
     max_sessions: usize,
     ext_keys: &[String],
+    transport_name: &str,
+    mut reader: BufReader<Box<dyn Read + Send>>,
 ) {
-    let stdin = io::stdin();
-    let mut reader = io::BufReader::new(stdin.lock());
-
     let codec = match forced_codec {
         Some(c) => c,
         None => {
@@ -919,7 +913,7 @@ pub(crate) fn run(
         Mode::Mock => ("mock", "none"),
     };
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = crate::renderer::emit_hello(mode_str, backend, &ext_key_refs) {
+    if let Err(e) = crate::renderer::emit_hello(mode_str, backend, &ext_key_refs, transport_name) {
         log::error!("failed to emit hello: {e}");
         return;
     }
@@ -1082,10 +1076,8 @@ fn run_multiplexed(
     // sessions; back-pressure blocks session threads when stdout is slow.
     let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(256);
     let writer_handle = thread::spawn(move || {
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
         for bytes in writer_rx {
-            if handle.write_all(&bytes).is_err() || handle.flush().is_err() {
+            if crate::renderer::write_output(&bytes).is_err() {
                 break;
             }
         }
