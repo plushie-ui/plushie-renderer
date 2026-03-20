@@ -50,9 +50,9 @@ impl Write for ChannelWriter {
             return Ok(());
         }
         let bytes = std::mem::take(&mut self.buffer);
-        self.tx.send(bytes).map_err(|_| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "writer thread exited")
-        })
+        self.tx
+            .send(bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "writer thread exited"))
     }
 }
 

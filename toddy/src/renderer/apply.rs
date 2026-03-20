@@ -90,9 +90,8 @@ impl App {
                 if !self.core.subscription_rates.contains_key(&key) {
                     self.emitter.remove_subscription_rate(&key);
                     // Flush pending events for this subscription.
-                    self.emitter.flush_key(
-                        &super::emitter::CoalesceKey::Subscription(key),
-                    );
+                    self.emitter
+                        .flush_key(&super::emitter::CoalesceKey::Subscription(key));
                 }
             }
         }

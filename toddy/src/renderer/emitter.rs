@@ -68,17 +68,11 @@ impl PendingEvent {
                 total_dy,
             } => {
                 // Patch the accumulated deltas back into the event's data.
-                if let Some(ref mut data) = base.data {
-                    if let Some(obj) = data.as_object_mut() {
-                        obj.insert(
-                            "delta_x".to_string(),
-                            serde_json::json!(total_dx),
-                        );
-                        obj.insert(
-                            "delta_y".to_string(),
-                            serde_json::json!(total_dy),
-                        );
-                    }
+                if let Some(ref mut data) = base.data
+                    && let Some(obj) = data.as_object_mut()
+                {
+                    obj.insert("delta_x".to_string(), serde_json::json!(total_dx));
+                    obj.insert("delta_y".to_string(), serde_json::json!(total_dy));
                 }
                 base
             }
@@ -279,15 +273,14 @@ impl EventEmitter {
     ) {
         match strategy {
             CoalesceStrategy::Replace => {
-                self.pending.insert(key.clone(), PendingEvent::Replace(event));
+                self.pending
+                    .insert(key.clone(), PendingEvent::Replace(event));
             }
             CoalesceStrategy::AccumulateDeltas => {
                 let (dx, dy) = extract_deltas(&event);
                 match self.pending.get_mut(key) {
                     Some(PendingEvent::Accumulate {
-                        total_dx,
-                        total_dy,
-                        ..
+                        total_dx, total_dy, ..
                     }) => {
                         *total_dx += dx;
                         *total_dy += dy;
@@ -324,14 +317,8 @@ fn extract_deltas(event: &OutgoingEvent) -> (f64, f64) {
         Some(o) => o,
         None => return (0.0, 0.0),
     };
-    let dx = obj
-        .get("delta_x")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let dy = obj
-        .get("delta_y")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let dx = obj.get("delta_x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let dy = obj.get("delta_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
     (dx, dy)
 }
 
@@ -369,7 +356,6 @@ pub(super) fn widget_coalesce_strategy(event: &OutgoingEvent) -> CoalesceStrateg
 pub(super) fn widget_coalesce_key(event: &OutgoingEvent) -> CoalesceKey {
     CoalesceKey::Widget(event.id.clone(), event.family.clone())
 }
-
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -509,9 +495,7 @@ mod tests {
 
         match emitter.pending.get(&key).unwrap() {
             PendingEvent::Accumulate {
-                total_dx,
-                total_dy,
-                ..
+                total_dx, total_dy, ..
             } => {
                 assert!((total_dx - 4.0).abs() < f64::EPSILON);
                 assert!((total_dy - 6.0).abs() < f64::EPSILON);
@@ -587,11 +571,7 @@ mod tests {
 
     #[test]
     fn extract_deltas_from_data() {
-        let ev = make_event_with_data(
-            "scroll",
-            "s1",
-            json!({"delta_x": 5.5, "delta_y": -3.2}),
-        );
+        let ev = make_event_with_data("scroll", "s1", json!({"delta_x": 5.5, "delta_y": -3.2}));
         let (dx, dy) = extract_deltas(&ev);
         assert!((dx - 5.5).abs() < f64::EPSILON);
         assert!((dy - (-3.2)).abs() < f64::EPSILON);

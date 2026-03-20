@@ -58,10 +58,11 @@ impl App {
                 for event in events {
                     let t = if emitter::is_coalescable_widget_event(&event) {
                         // Lazily cache event_rate from the widget's tree node.
-                        if !event.id.is_empty() && !self.emitter.has_widget_rate(&event.id) {
-                            if let Some(rate) = self.lookup_widget_event_rate(&event.id) {
-                                self.emitter.set_widget_rate(&event.id, rate);
-                            }
+                        if !event.id.is_empty()
+                            && !self.emitter.has_widget_rate(&event.id)
+                            && let Some(rate) = self.lookup_widget_event_rate(&event.id)
+                        {
+                            self.emitter.set_widget_rate(&event.id, rate);
                         }
                         let key = emitter::widget_coalesce_key(&event);
                         let strategy = emitter::widget_coalesce_strategy(&event);
