@@ -345,7 +345,8 @@ impl Session {
                 // flow this is a Snapshot or Patch with the updated
                 // tree. We apply whatever arrives through the normal
                 // path so tree changes, settings updates, etc. all work.
-                if let Some(msg) = read_next() {
+                let next = read_next();
+                if let Some(msg) = next {
                     let is_tree_change = matches!(
                         msg,
                         IncomingMessage::Snapshot { .. } | IncomingMessage::Patch { .. }
@@ -398,6 +399,12 @@ impl Session {
                             &self.theme,
                         );
                     }
+                } else {
+                    // stdin closed or channel dropped mid-interact.
+                    log::warn!(
+                        "stdin closed mid-interact, stopping event injection"
+                    );
+                    break;
                 }
             }
 
