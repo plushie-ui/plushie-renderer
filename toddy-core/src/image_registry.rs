@@ -10,6 +10,12 @@ use std::collections::HashMap;
 
 use iced::widget::image;
 
+/// Maximum number of images the registry will hold.
+const MAX_IMAGES: usize = 4096;
+
+/// Maximum aggregate byte usage across all images (1 GiB).
+const MAX_TOTAL_BYTES: usize = 1024 * 1024 * 1024;
+
 /// Sniff the image format from the first few bytes (magic bytes).
 /// Returns `None` if the format is not recognized.
 fn sniff_image_format(data: &[u8]) -> Option<&'static str> {
@@ -36,14 +42,22 @@ fn sniff_image_format(data: &[u8]) -> Option<&'static str> {
 
 /// In-memory registry for image handles. Allows the host to send raw pixel
 /// or encoded image data and reference them by name in the UI tree.
+///
+/// Enforces per-image size limits and aggregate limits (count and total bytes)
+/// to prevent unbounded memory growth from a misbehaving host.
 pub struct ImageRegistry {
     handles: HashMap<String, image::Handle>,
+    /// Per-image byte size tracking (parallel to `handles`).
+    sizes: HashMap<String, usize>,
+    /// Running total of all image bytes in the registry.
+    total_bytes: usize,
 }
 
 impl std::fmt::Debug for ImageRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ImageRegistry")
             .field("count", &self.handles.len())
+            .field("total_bytes", &self.total_bytes)
             .field("names", &self.handles.keys().collect::<Vec<_>>())
             .finish()
     }
@@ -59,6 +73,8 @@ impl ImageRegistry {
     pub fn new() -> Self {
         Self {
             handles: HashMap::new(),
+            sizes: HashMap::new(),
+            total_bytes: 0,
         }
     }
 
@@ -67,6 +83,48 @@ impl ImageRegistry {
 
     /// Maximum pixel data size in bytes (256 MB).
     const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024;
+
+    /// Check aggregate limits before inserting. Accounts for the case where
+    /// an existing image with the same name is being replaced (its bytes
+    /// will be freed).
+    fn check_aggregate_limits(&self, name: &str, new_bytes: usize) -> Result<(), String> {
+        let existing_bytes = self.sizes.get(name).copied().unwrap_or(0);
+        let is_new_entry = existing_bytes == 0;
+
+        if is_new_entry && self.handles.len() >= MAX_IMAGES {
+            let msg = format!(
+                "image registry: count limit reached ({MAX_IMAGES}), \
+                 cannot add '{name}'"
+            );
+            log::error!("{msg}");
+            return Err(msg);
+        }
+
+        let projected = self.total_bytes - existing_bytes + new_bytes;
+        if projected > MAX_TOTAL_BYTES {
+            let msg = format!(
+                "image registry: total byte limit exceeded \
+                 (current={}, adding={new_bytes}, limit={MAX_TOTAL_BYTES}), \
+                 cannot add '{name}'",
+                self.total_bytes
+            );
+            log::error!("{msg}");
+            return Err(msg);
+        }
+
+        Ok(())
+    }
+
+    /// Insert a handle and update size tracking. Handles replacement of
+    /// existing entries by subtracting the old size first.
+    fn insert(&mut self, name: &str, handle: image::Handle, byte_count: usize) {
+        if let Some(old_size) = self.sizes.get(name) {
+            self.total_bytes -= old_size;
+        }
+        self.handles.insert(name.to_owned(), handle);
+        self.sizes.insert(name.to_owned(), byte_count);
+        self.total_bytes += byte_count;
+    }
 
     /// Store an image from encoded bytes (PNG, JPEG, etc.).
     pub fn create_from_bytes(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
@@ -79,6 +137,7 @@ impl ImageRegistry {
             log::error!("image registry: {msg}");
             return Err(msg);
         }
+        self.check_aggregate_limits(name, data.len())?;
         if sniff_image_format(&data).is_none() && !data.is_empty() {
             log::warn!(
                 "image: unrecognized format (first bytes: {:02x?}), passing through [id={}]",
@@ -86,8 +145,8 @@ impl ImageRegistry {
                 name
             );
         }
-        self.handles
-            .insert(name.to_owned(), image::Handle::from_bytes(data));
+        let byte_count = data.len();
+        self.insert(name, image::Handle::from_bytes(data), byte_count);
         Ok(())
     }
 
@@ -138,9 +197,12 @@ impl ImageRegistry {
             return Err(msg);
         }
 
-        self.handles.insert(
-            name.to_owned(),
+        self.check_aggregate_limits(name, pixels.len())?;
+        let byte_count = pixels.len();
+        self.insert(
+            name,
             image::Handle::from_rgba(width, height, pixels),
+            byte_count,
         );
         Ok(())
     }
@@ -148,6 +210,9 @@ impl ImageRegistry {
     /// Remove a named image handle.
     pub fn delete(&mut self, name: &str) {
         self.handles.remove(name);
+        if let Some(size) = self.sizes.remove(name) {
+            self.total_bytes -= size;
+        }
     }
 
     /// Look up a named image handle.
@@ -163,6 +228,8 @@ impl ImageRegistry {
     /// Remove all registered image handles.
     pub fn clear(&mut self) {
         self.handles.clear();
+        self.sizes.clear();
+        self.total_bytes = 0;
     }
 
     /// Dispatch an image operation by name.
@@ -209,6 +276,7 @@ mod tests {
     fn new_registry_is_empty() {
         let reg = ImageRegistry::new();
         assert!(reg.get("nope").is_none());
+        assert_eq!(reg.total_bytes, 0);
     }
 
     #[test]
@@ -219,6 +287,7 @@ mod tests {
                 .is_ok()
         );
         assert!(reg.get("test").is_some());
+        assert_eq!(reg.total_bytes, 4);
     }
 
     #[test]
@@ -230,29 +299,35 @@ mod tests {
                 .is_ok()
         );
         assert!(reg.get("pixel").is_some());
+        assert_eq!(reg.total_bytes, 4);
     }
 
     #[test]
     fn delete_removes_handle() {
         let mut reg = ImageRegistry::new();
         let _ = reg.create_from_bytes("gone", vec![1, 2, 3]);
+        assert_eq!(reg.total_bytes, 3);
         reg.delete("gone");
         assert!(reg.get("gone").is_none());
+        assert_eq!(reg.total_bytes, 0);
     }
 
     #[test]
     fn delete_nonexistent_is_noop() {
         let mut reg = ImageRegistry::new();
         reg.delete("never_existed");
-        // no panic
+        assert_eq!(reg.total_bytes, 0);
     }
 
     #[test]
     fn overwrite_replaces_handle() {
         let mut reg = ImageRegistry::new();
         let _ = reg.create_from_bytes("img", vec![1]);
+        assert_eq!(reg.total_bytes, 1);
         let _ = reg.create_from_bytes("img", vec![2, 3]);
         assert!(reg.get("img").is_some());
+        // Old size (1) replaced by new size (2)
+        assert_eq!(reg.total_bytes, 2);
     }
 
     #[test]
@@ -414,5 +489,50 @@ mod tests {
                 .is_ok()
         );
         assert!(reg.get("reused").is_some());
+    }
+
+    // -- Aggregate limit tests ------------------------------------------------
+
+    #[test]
+    fn count_limit_rejects_at_max() {
+        let mut reg = ImageRegistry::new();
+        // Fill to capacity with tiny images
+        for i in 0..MAX_IMAGES {
+            let name = format!("img_{i}");
+            assert!(
+                reg.create_from_bytes(&name, vec![0x89, 0x50, 0x4e, 0x47])
+                    .is_ok(),
+                "image {i} should succeed"
+            );
+        }
+        assert_eq!(reg.handles.len(), MAX_IMAGES);
+        // One more should fail
+        let result = reg.create_from_bytes("one_too_many", vec![1]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("count limit"));
+    }
+
+    #[test]
+    fn update_existing_does_not_count_as_new() {
+        let mut reg = ImageRegistry::new();
+        for i in 0..MAX_IMAGES {
+            let name = format!("img_{i}");
+            let _ = reg.create_from_bytes(&name, vec![1]);
+        }
+        // Updating an existing image should succeed (not a new entry)
+        assert!(reg.create_from_bytes("img_0", vec![2, 3]).is_ok());
+    }
+
+    #[test]
+    fn total_bytes_tracking_across_operations() {
+        let mut reg = ImageRegistry::new();
+        let _ = reg.create_from_bytes("a", vec![1, 2, 3]);
+        assert_eq!(reg.total_bytes, 3);
+        let _ = reg.create_from_rgba("b", 1, 1, vec![0, 0, 0, 0]);
+        assert_eq!(reg.total_bytes, 7);
+        reg.delete("a");
+        assert_eq!(reg.total_bytes, 4);
+        reg.clear();
+        assert_eq!(reg.total_bytes, 0);
     }
 }
