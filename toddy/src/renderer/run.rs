@@ -14,6 +14,12 @@ use super::emitters::emit_hello;
 use super::stdin::{STDIN_RX, read_initial_settings, spawn_stdin_reader};
 
 pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
+    // On Windows, stdin/stdout default to text mode which translates
+    // \n <-> \r\n. This corrupts MessagePack framing and length-prefixed
+    // binary data. Switch to binary mode before any I/O.
+    #[cfg(windows)]
+    set_binary_mode();
+
     let args: Vec<String> = std::env::args().collect();
 
     // Levelled logging via RUST_LOG. Default: warn (quiet). Use
@@ -149,4 +155,25 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
     .scale_factor(App::scale_factor_for_window)
     .settings(iced_settings)
     .run()
+}
+
+/// Switch stdin and stdout to binary mode on Windows.
+///
+/// Without this, the CRT translates `\n` to `\r\n` on write and `\r\n`
+/// to `\n` on read. That breaks both MessagePack length-prefixed framing
+/// and any binary payload (screenshots, font data, image bytes).
+#[cfg(windows)]
+fn set_binary_mode() {
+    extern "C" {
+        fn _setmode(fd: i32, mode: i32) -> i32;
+    }
+    const O_BINARY: i32 = 0x8000;
+
+    // _setmode takes C runtime file descriptors (small integers), not
+    // Win32 HANDLEs. stdin and stdout are always fd 0 and 1 per the
+    // C standard and MSVC/MinGW CRT guarantees.
+    unsafe {
+        _setmode(0, O_BINARY);
+        _setmode(1, O_BINARY);
+    }
 }
