@@ -25,5 +25,11 @@ pub mod window_ops;
 
 pub mod effects;
 
-pub use app::{App, validate_scale_factor};
+/// The iced daemon application. See [`app::App`] for details.
+pub use app::App;
+
+/// Clamp or reject invalid scale factors. See [`app::validate_scale_factor`].
+pub use app::validate_scale_factor;
+
+/// Trait for platform-specific side effects. See [`effects::EffectHandler`].
 pub use effects::EffectHandler;

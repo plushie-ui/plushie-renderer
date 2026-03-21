@@ -1,8 +1,23 @@
 //! WASM entry point for the toddy renderer.
 //!
-//! This crate provides a `wasm-bindgen` API for running toddy in the
-//! browser. It uses `iced::daemon` with a canvas-based backend and
-//! communicates with the host via JavaScript callbacks.
+//! Provides a `wasm-bindgen` API for running toddy in the browser.
+//! Uses `iced::daemon` with a canvas-based backend and communicates
+//! with the host via JavaScript callbacks.
+//!
+//! # Entry point
+//!
+//! [`run_app(settings_json, on_event)`](run_app) is the single entry
+//! point. It parses the settings JSON, validates the protocol version,
+//! emits the hello handshake, and starts the iced daemon.
+//!
+//! # Limitations
+//!
+//! - Platform effects (file dialogs, clipboard, notifications) are
+//!   stubbed as unsupported.
+//! - Message ingestion (sending Snapshots/Patches after startup) is
+//!   not yet implemented. The initial settings are applied at startup;
+//!   runtime tree updates require an async channel that hasn't been
+//!   wired yet.
 
 mod effects;
 mod output;
@@ -18,45 +33,12 @@ use toddy_renderer::emitters::{emit_hello, init_output};
 use effects::WebEffectHandler;
 use output::WebOutputWriter;
 
-/// Initialize the WASM toddy renderer.
-///
-/// `on_event` is a JavaScript callback that receives serialized event
-/// strings whenever the renderer emits an outgoing event.
-///
-/// Returns a promise that resolves when the renderer exits (which
-/// typically only happens if the host explicitly closes it).
-#[wasm_bindgen]
-pub fn start(on_event: js_sys::Function) -> Result<(), JsValue> {
-    // Initialize console logging for WASM.
-    console_log::init_with_level(log::Level::Warn).ok();
-
-    // Set up the output writer with the JS callback.
-    let writer = WebOutputWriter::new(on_event);
-    init_output(Box::new(writer));
-
-    // Use JSON codec for WASM (simpler JS interop than msgpack).
-    Codec::set_global(Codec::Json);
-
-    Ok(())
-}
-
-/// Send a JSON message to the renderer.
-///
-/// The message is parsed as an `IncomingMessage` and processed by the
-/// renderer. This is the WASM equivalent of writing to stdin.
-#[wasm_bindgen]
-pub fn send_message(json: &str) -> Result<(), JsValue> {
-    let _msg: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    // Message processing will be wired through the daemon's update
-    // loop in a future iteration. For now this validates parsing.
-    Ok(())
-}
-
 /// Run the iced daemon with the given settings JSON and event callback.
 ///
-/// This starts the full iced rendering loop. The function returns a
-/// Future that is driven by the browser's requestAnimationFrame loop.
+/// This is the single entry point for the WASM renderer. It validates
+/// the protocol version, emits the hello handshake, and starts the
+/// full iced rendering loop. The returned Future is driven by the
+/// browser's requestAnimationFrame loop.
 #[wasm_bindgen]
 pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<(), JsValue> {
     console_log::init_with_level(log::Level::Warn).ok();
@@ -70,8 +52,19 @@ pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<
     let settings: serde_json::Value = serde_json::from_str(settings_json)
         .map_err(|e| JsValue::from_str(&format!("invalid settings JSON: {e}")))?;
 
+    // Validate protocol version
+    let expected = u64::from(toddy_core::protocol::PROTOCOL_VERSION);
+    if let Some(version) = settings.get("protocol_version").and_then(|v| v.as_u64())
+        && version != expected
+    {
+        return Err(JsValue::from_str(&format!(
+            "protocol version mismatch: expected {expected}, got {version}"
+        )));
+    }
+
     // Emit hello
-    let _ = emit_hello("web", "wgpu", &[], "wasm");
+    emit_hello("web", "wgpu", &[], "wasm")
+        .map_err(|e| JsValue::from_str(&format!("failed to emit hello: {e}")))?;
 
     // Build the app inside a Mutex so the Fn closure can move it out once.
     let app_slot: std::sync::Mutex<Option<(serde_json::Value, toddy_core::app::ToddyAppBuilder)>> =

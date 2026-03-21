@@ -12,17 +12,15 @@ use wasm_bindgen::prelude::*;
 ///
 /// The callback receives a single string argument containing the
 /// JSON-encoded event data.
-///
-/// # Safety
-///
-/// `Send` is implemented because WASM is single-threaded. The
-/// `js_sys::Function` is only ever accessed from the main thread.
 pub struct WebOutputWriter {
     callback: js_sys::Function,
 }
 
-// SAFETY: WASM is single-threaded. JsValue/Function are only accessed
-// from the main (and only) thread.
+// SAFETY: WebOutputWriter holds a js_sys::Function which contains a
+// raw pointer (JsValue). On wasm32-unknown-unknown, there is only one
+// thread, so Send is trivially satisfied -- the value is never actually
+// transferred between threads. This impl must NOT be used on multi-
+// threaded WASM targets (e.g. wasm32-unknown-unknown with shared memory).
 #[allow(unsafe_code)]
 unsafe impl Send for WebOutputWriter {}
 
@@ -36,9 +34,12 @@ impl Write for WebOutputWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let json = String::from_utf8_lossy(buf);
         let js_str = JsValue::from_str(&json);
-        self.callback
-            .call1(&JsValue::NULL, &js_str)
-            .map_err(|_| io::Error::other("JS callback failed"))?;
+        self.callback.call1(&JsValue::NULL, &js_str).map_err(|e| {
+            let msg = e
+                .as_string()
+                .unwrap_or_else(|| "unknown JS error".to_string());
+            io::Error::other(format!("JS callback failed: {msg}"))
+        })?;
         Ok(buf.len())
     }
 

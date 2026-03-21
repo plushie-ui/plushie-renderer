@@ -23,11 +23,11 @@ use toddy_core::protocol::OutgoingEvent;
 
 static OUTPUT_WRITER: OnceLock<Mutex<Box<dyn Write + Send>>> = OnceLock::new();
 
-/// Initialize the global output writer. Must be called once at startup.
+/// Initialize the global output writer.
 ///
-/// The caller provides a boxed [`Write`] implementation. On native,
-/// this is typically a ChannelWriter backed by a background thread.
-/// On WASM, this wraps a JS callback.
+/// Must be called exactly once before any `emit_*` functions. Panics
+/// if called twice. On native, pass a `ChannelWriter` for non-blocking
+/// I/O. On WASM, pass a `WebOutputWriter` wrapping a JS callback.
 pub fn init_output(writer: Box<dyn Write + Send>) {
     if OUTPUT_WRITER.set(Mutex::new(writer)).is_err() {
         panic!("output writer already initialized");
