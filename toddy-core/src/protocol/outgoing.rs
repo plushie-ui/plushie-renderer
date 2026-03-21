@@ -573,8 +573,8 @@ impl OutgoingEvent {
     pub fn canvas_scroll(id: String, x: f32, y: f32, delta_x: f32, delta_y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "cursor_x": sanitize_f32(x),
-                "cursor_y": sanitize_f32(y),
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
                 "delta_x": sanitize_f32(delta_x),
                 "delta_y": sanitize_f32(delta_y),
             })),
@@ -824,8 +824,10 @@ impl OutgoingEvent {
     /// Scroll event from scripting.
     pub fn scripting_scroll(delta_x: f64, delta_y: f64) -> Self {
         Self {
-            data: Some(serde_json::json!({"delta_x": delta_x, "delta_y": delta_y})),
-            ..Self::bare("scroll", String::new())
+            data: Some(
+                serde_json::json!({"delta_x": delta_x, "delta_y": delta_y, "unit": "pixel"}),
+            ),
+            ..Self::bare("wheel_scrolled", String::new())
         }
     }
 

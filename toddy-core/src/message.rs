@@ -148,8 +148,8 @@ pub enum Message {
     /// Canvas scroll event.
     CanvasScroll {
         id: String,
-        cursor_x: f32,
-        cursor_y: f32,
+        x: f32,
+        y: f32,
         delta_x: f32,
         delta_y: f32,
     },

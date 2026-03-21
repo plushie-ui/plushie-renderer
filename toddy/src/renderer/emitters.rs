@@ -316,14 +316,14 @@ pub(crate) fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
         },
         Message::CanvasScroll {
             id,
-            cursor_x,
-            cursor_y,
+            x,
+            y,
             delta_x,
             delta_y,
         } => Some(OutgoingEvent::canvas_scroll(
             id.clone(),
-            *cursor_x,
-            *cursor_y,
+            *x,
+            *y,
             *delta_x,
             *delta_y,
         )),
@@ -590,8 +590,8 @@ mod tests {
     fn message_to_event_canvas_scroll() {
         let msg = Message::CanvasScroll {
             id: "c1".into(),
-            cursor_x: 10.0,
-            cursor_y: 20.0,
+            x: 10.0,
+            y: 20.0,
             delta_x: 1.0,
             delta_y: -1.0,
         };

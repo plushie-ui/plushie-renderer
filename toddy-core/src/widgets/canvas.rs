@@ -1648,8 +1648,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 };
                 Some(iced::widget::Action::publish(Message::CanvasScroll {
                     id: self.id.clone(),
-                    cursor_x: position.x,
-                    cursor_y: position.y,
+                    x: position.x,
+                    y: position.y,
                     delta_x: dx,
                     delta_y: dy,
                 }))

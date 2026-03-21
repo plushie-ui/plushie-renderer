@@ -493,7 +493,7 @@ mod tests {
         let base = make_event_with_data(
             "canvas_scroll",
             "c1",
-            json!({"delta_x": 1.0, "delta_y": 2.0, "cursor_x": 50.0}),
+            json!({"delta_x": 1.0, "delta_y": 2.0, "x": 50.0}),
         );
         let mut totals = HashMap::new();
         totals.insert("delta_x".to_string(), 10.0);
@@ -508,7 +508,7 @@ mod tests {
         assert_eq!(data["delta_x"], 10.0);
         assert_eq!(data["delta_y"], 20.0);
         // Other fields preserved.
-        assert_eq!(data["cursor_x"], 50.0);
+        assert_eq!(data["x"], 50.0);
     }
 
     // -- CoalesceHint on constructors --
