@@ -317,9 +317,48 @@ pub(crate) fn interaction_to_iced_events(
                 position: Point::new(x, y),
             })]
         }
+        // Canvas actions: convert to real iced mouse events so the
+        // canvas widget's Program::update() runs and produces shape-
+        // level events (enter/leave/click/drag) in headless mode.
+        "canvas_press" => {
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let button = match payload.get("button").and_then(|v| v.as_str()) {
+                Some("right") => mouse::Button::Right,
+                Some("middle") => mouse::Button::Middle,
+                _ => mouse::Button::Left,
+            };
+            vec![
+                Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(x, y),
+                }),
+                Event::Mouse(mouse::Event::ButtonPressed(button)),
+            ]
+        }
+        "canvas_release" => {
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let button = match payload.get("button").and_then(|v| v.as_str()) {
+                Some("right") => mouse::Button::Right,
+                Some("middle") => mouse::Button::Middle,
+                _ => mouse::Button::Left,
+            };
+            vec![
+                Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(x, y),
+                }),
+                Event::Mouse(mouse::Event::ButtonReleased(button)),
+            ]
+        }
+        "canvas_move" => {
+            let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            vec![Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(x, y),
+            })]
+        }
         // Synthetic-only actions: no iced event injection needed.
-        "paste" | "sort" | "canvas_press" | "canvas_release" | "canvas_move"
-        | "pane_focus_cycle" | "slide" => vec![],
+        "paste" | "sort" | "pane_focus_cycle" | "slide" => vec![],
         _ => vec![],
     }
 }
@@ -1513,16 +1552,8 @@ mod tests {
 
     #[test]
     fn interaction_to_iced_events_synthetic_only() {
-        // These actions should produce no iced events.
-        for action in &[
-            "paste",
-            "sort",
-            "canvas_press",
-            "canvas_release",
-            "canvas_move",
-            "pane_focus_cycle",
-            "slide",
-        ] {
+        // These actions should produce no iced events (synthetic-only).
+        for action in &["paste", "sort", "pane_focus_cycle", "slide"] {
             let events = interaction_to_iced_events(
                 action,
                 Some("w1"),
