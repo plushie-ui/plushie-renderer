@@ -25,3 +25,15 @@ unreachable_patterns = "deny"
 # CI promotes all warnings to errors via RUSTFLAGS="-D warnings" in the
 # justfile. Specific clippy denials go here only when they should block
 # local development too (not just CI).
+
+# Release profile optimizations. Commented out because they increase
+# compile times significantly (~3-5x). Uncomment for release/CI builds.
+# These apply to both native and WASM targets.
+#
+# See docs/wasm-build.md for WASM-specific size measurements.
+#
+# [profile.release]
+# lto = true           # cross-crate dead code elimination (~20-30% smaller)
+# codegen-units = 1    # single codegen unit, better optimization opportunities
+# opt-level = "z"      # optimize for size over speed (UI is GPU-bound, not CPU)
+# strip = true         # remove symbol names from the binary
