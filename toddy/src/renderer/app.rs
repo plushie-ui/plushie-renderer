@@ -175,15 +175,19 @@ impl App {
         strategy: CoalesceStrategy,
         event_fn: impl FnOnce(String) -> OutgoingEvent,
     ) -> Task<Message> {
-        let (sub_key, tag) = if let Some(tag) = self.core.active_subscriptions.get(key) {
-            (key.to_string(), tag.clone())
+        let tag = if let Some(tag) = self.core.active_subscriptions.get(key) {
+            tag.clone()
         } else if let Some(tag) = self.core.active_subscriptions.get(SUB_EVENT) {
-            (SUB_EVENT.to_string(), tag.clone())
+            tag.clone()
         } else {
             return Task::none();
         };
         let event = event_fn(tag).with_captured(captured);
+        // Always key by the original event kind (not the resolved
+        // subscription key) so different event types don't coalesce
+        // against each other when both fall through to the on_event
+        // catch-all.
         self.emitter
-            .coalesce(CoalesceKey::Subscription(sub_key), event, strategy)
+            .coalesce(CoalesceKey::Subscription(key.to_string()), event, strategy)
     }
 }

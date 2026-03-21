@@ -299,9 +299,16 @@ impl Core {
                          (was `{old_tag}`); previous handler replaced"
                     );
                 }
-                if let Some(rate) = max_rate {
-                    log::debug!("subscription `{kind}` max_rate: {rate}");
-                    self.subscription_rates.insert(kind, Some(rate));
+                match max_rate {
+                    Some(rate) => {
+                        log::debug!("subscription `{kind}` max_rate: {rate}");
+                        self.subscription_rates.insert(kind, Some(rate));
+                    }
+                    None => {
+                        // Re-subscribing without max_rate clears any
+                        // previously-set rate for this subscription.
+                        self.subscription_rates.remove(&kind);
+                    }
                 }
             }
             IncomingMessage::Unsubscribe { kind } => {
