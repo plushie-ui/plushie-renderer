@@ -176,6 +176,44 @@ fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<Interactiv
         return None;
     }
 
+    // Validate known fields -- warn on typos like "on_clck".
+    const KNOWN_INTERACTIVE_FIELDS: &[&str] = &[
+        "id",
+        "on_click",
+        "on_hover",
+        "cursor",
+        "draggable",
+        "drag_axis",
+        "drag_bounds",
+        "tooltip",
+        "a11y",
+        "hit_rect",
+        "hover_style",
+        "pressed_style",
+    ];
+    for key in interactive.keys() {
+        if !KNOWN_INTERACTIVE_FIELDS.contains(&key.as_str()) {
+            log::warn!(
+                "canvas shape '{id}': unknown interactive field '{key}' \
+                 (known: id, on_click, on_hover, cursor, draggable, \
+                 drag_axis, drag_bounds, tooltip, a11y, hit_rect, \
+                 hover_style, pressed_style)"
+            );
+        }
+    }
+
+    // Warn on common mistakes.
+    let draggable = interactive
+        .get("draggable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !draggable && interactive.contains_key("drag_bounds") {
+        log::warn!("canvas shape '{id}': drag_bounds set without draggable: true");
+    }
+    if !draggable && interactive.contains_key("drag_axis") {
+        log::warn!("canvas shape '{id}': drag_axis set without draggable: true");
+    }
+
     let hit_region = compute_hit_region(shape, interactive)?;
 
     let drag_axis = match interactive
