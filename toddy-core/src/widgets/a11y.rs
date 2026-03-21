@@ -888,6 +888,8 @@ mod tests {
         assert_eq!(parse_role("combobox"), None);
         assert_eq!(parse_role("listitem"), None);
         assert_eq!(parse_role("menubar"), None);
+        assert_eq!(parse_role("scrollbar"), None);
+        assert_eq!(parse_role("columnheader"), None);
         assert_eq!(parse_role("unknown_thing"), None);
     }
 

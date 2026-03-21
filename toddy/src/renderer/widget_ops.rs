@@ -58,8 +58,7 @@ impl App {
                     .and_then(|v| v.as_f64())
                     .map(|v| v as f32);
                 let offset_y = payload
-                    .get("offset")
-                    .or_else(|| payload.get("offset_y"))
+                    .get("offset_y")
                     .and_then(|v| v.as_f64())
                     .map(|v| v as f32);
                 iced::widget::operation::scroll_to(
