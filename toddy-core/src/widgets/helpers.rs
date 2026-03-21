@@ -152,20 +152,10 @@ pub(crate) fn parse_interaction(s: &str) -> Option<mouse::Interaction> {
 pub(crate) use crate::theming::parse_hex_color;
 
 /// Parse a color from a JSON value. Accepts:
-/// - A hex string: "#rrggbb" or "#rrggbbaa"
-/// - An object: {"r": 0.5, "g": 0.5, "b": 0.5, "a": 1.0} (0-1 floats)
+/// Parse a color from a JSON value. Accepts hex strings: `"#rrggbb"` or
+/// `"#rrggbbaa"`. Returns `None` for non-string values.
 pub(crate) fn parse_color(value: &Value) -> Option<Color> {
-    match value {
-        Value::String(s) => parse_hex_color(s),
-        Value::Object(obj) => {
-            let r = (obj.get("r").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(0.0, 1.0);
-            let g = (obj.get("g").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(0.0, 1.0);
-            let b = (obj.get("b").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(0.0, 1.0);
-            let a = (obj.get("a").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32).clamp(0.0, 1.0);
-            Some(Color::from_rgba(r, g, b, a))
-        }
-        _ => None,
-    }
+    value.as_str().and_then(parse_hex_color)
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +163,7 @@ pub(crate) fn parse_color(value: &Value) -> Option<Color> {
 // ---------------------------------------------------------------------------
 
 /// Parse a background from a JSON value. Accepts:
-/// - A color string ("#rrggbb") or object ({r,g,b,a}) -> Background::Color
+/// - A color string ("#rrggbb" or "#rrggbbaa") -> Background::Color
 /// - A gradient object: {"type": "linear", "angle": 45, "stops": [{"offset": 0.0, "color": "#ff0000"}, ...]}
 pub(crate) fn parse_background(value: &Value) -> Option<iced::Background> {
     match value {
@@ -860,7 +850,7 @@ pub(crate) fn parse_line_height(props: Props<'_>) -> Option<LineHeight> {
 /// Parse text_shaping prop from a string.
 pub(crate) fn parse_shaping(props: Props<'_>) -> Option<iced::widget::text::Shaping> {
     use iced::widget::text::Shaping;
-    let s = prop_str(props, "text_shaping")?;
+    let s = prop_str(props, "shaping")?;
     match s.to_ascii_lowercase().as_str() {
         "basic" => Some(Shaping::Basic),
         "advanced" => Some(Shaping::Advanced),
@@ -1174,17 +1164,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_color_object_rgba() {
+    fn parse_color_rejects_objects() {
+        // Object-format colors are not accepted. Hex strings only.
         let v = json!({"r": 0.5, "g": 0.25, "b": 0.75, "a": 0.8});
-        let c = parse_color(&v).unwrap();
-        assert_eq!(c, Color::from_rgba(0.5, 0.25, 0.75, 0.8));
-    }
-
-    #[test]
-    fn parse_color_object_defaults_alpha_to_one() {
-        let v = json!({"r": 1.0, "g": 0.0, "b": 0.0});
-        let c = parse_color(&v).unwrap();
-        assert_eq!(c, Color::from_rgba(1.0, 0.0, 0.0, 1.0));
+        assert!(parse_color(&v).is_none());
     }
 
     #[test]

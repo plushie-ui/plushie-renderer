@@ -171,6 +171,9 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("style", Any),
             ("icon", Any),
             ("disabled", Bool),
+            ("line_height", Number),
+            ("wrapping", Str),
+            ("shaping", Str),
         ],
         "toggler" => &[
             ("label", Str),
@@ -182,6 +185,9 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("width", Length),
             ("style", Any),
             ("disabled", Bool),
+            ("line_height", Number),
+            ("wrapping", Str),
+            ("shaping", Str),
         ],
         "progress_bar" => &[
             ("value", Number),
@@ -200,7 +206,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("filter_method", Str),
             ("rotation", Any),
             ("opacity", Number),
-            ("border_radius", Any),
+            ("border_radius", Number),
             ("expand", Bool),
             ("scale", Number),
             ("alt", Str),
@@ -255,6 +261,9 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("width", Length),
             ("style", Any),
             ("group", Str),
+            ("line_height", Number),
+            ("wrapping", Str),
+            ("shaping", Str),
         ],
         "tooltip" => &[
             ("tip", Str),
@@ -420,6 +429,7 @@ pub(crate) fn collect_prop_warnings(node: &TreeNode) -> Vec<String> {
             ("leeway", Number),
             ("divider_color", Color),
             ("divider_width", Number),
+            ("split_axis", Str),
         ],
         "markdown" => &[
             ("content", Str),
