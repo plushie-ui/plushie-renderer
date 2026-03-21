@@ -83,6 +83,15 @@ pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<
             let effect_handler = Box::new(WebEffectHandler);
             let mut app = App::new(dispatcher, effect_handler);
 
+            // Extract scale_factor before applying settings to Core.
+            app.scale_factor = toddy_renderer::validate_scale_factor(
+                settings
+                    .get("scale_factor")
+                    .and_then(|v| v.as_f64())
+                    .map(toddy_core::prop_helpers::f64_to_f32)
+                    .unwrap_or(1.0),
+            );
+
             let effects = app.core.apply(IncomingMessage::Settings { settings });
             for effect in effects {
                 if let toddy_core::engine::CoreEffect::ExtensionConfig(config) = effect {
