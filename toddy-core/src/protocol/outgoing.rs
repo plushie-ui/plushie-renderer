@@ -639,8 +639,8 @@ impl OutgoingEvent {
                 "shape_id": shape_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
-                "dx": sanitize_f32(dx),
-                "dy": sanitize_f32(dy),
+                "delta_x": sanitize_f32(dx),
+                "delta_y": sanitize_f32(dy),
             })),
             coalesce: Some(CoalesceHint::Replace),
             ..Self::bare("canvas_shape_drag", canvas_id)

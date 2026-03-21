@@ -78,9 +78,12 @@ impl App {
                 }
             }
         }
-        if is_unsubscribe {
+        if is_subscribe || is_unsubscribe {
             // Clean up emitter rates for removed subscriptions by
-            // diffing against Core's subscription_rates.
+            // diffing against Core's subscription_rates. This covers
+            // both explicit Unsubscribe AND re-Subscribe with max_rate
+            // cleared (Subscribe without max_rate removes the rate
+            // from Core but the emitter needs to be synced).
             let emitter_keys: Vec<String> = self
                 .emitter
                 .subscription_rate_keys()
