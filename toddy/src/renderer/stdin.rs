@@ -192,50 +192,12 @@ pub(crate) fn read_initial_settings(
             }
 
             // Enable prop validation if requested.
-            if settings
-                .get("validate_props")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                toddy_core::widgets::set_validate_props(true);
-                log::info!("prop validation enabled via settings");
-            }
+            toddy_renderer::settings::apply_validate_props(&settings);
 
-            let antialiasing = settings
-                .get("antialiasing")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let vsync = settings
-                .get("vsync")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            let default_text_size = settings
-                .get("default_text_size")
-                .and_then(|v| v.as_f64())
-                .map(|s| iced::Pixels(s as f32));
+            let iced_settings = toddy_renderer::settings::parse_iced_settings(&settings);
 
-            let default_font = settings.get("default_font").map(|v| {
-                let family = v.get("family").and_then(|f| f.as_str());
-                if family == Some("monospace") {
-                    iced::Font::MONOSPACE
-                } else {
-                    iced::Font::DEFAULT
-                }
-            });
-
-            let mut iced_settings = iced::Settings {
-                antialiasing,
-                vsync,
-                ..Default::default()
-            };
-            if let Some(size) = default_text_size {
-                iced_settings.default_text_size = size;
-            }
-            if let Some(font) = default_font {
-                iced_settings.default_font = font;
-            }
-
-            let mut font_bytes: Vec<Vec<u8>> = Vec::new();
+            let mut font_bytes = toddy_renderer::settings::parse_inline_fonts(&settings);
+            // Also load fonts from file paths (native only).
             if let Some(fonts) = settings.get("fonts").and_then(|v| v.as_array()) {
                 for font_val in fonts {
                     if let Some(path) = font_val.as_str() {

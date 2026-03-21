@@ -43,12 +43,10 @@ use output::WebOutputWriter;
 pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<(), JsValue> {
     console_log::init_with_level(log::Level::Warn).ok();
 
-    // Set up output
     let writer = WebOutputWriter::new(on_event);
     init_output(Box::new(writer));
     Codec::set_global(Codec::Json);
 
-    // Parse initial settings
     let settings: serde_json::Value = serde_json::from_str(settings_json)
         .map_err(|e| JsValue::from_str(&format!("invalid settings JSON: {e}")))?;
 
@@ -62,18 +60,33 @@ pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<
         )));
     }
 
-    // Emit hello
+    // Apply validate_props before any rendering
+    toddy_renderer::settings::apply_validate_props(&settings);
+
+    // Parse iced-level settings (antialiasing, default font/size, etc.)
+    let iced_settings = toddy_renderer::settings::parse_iced_settings(&settings);
+
+    // Parse inline font data (base64 or binary). File paths are not
+    // supported on WASM -- use the load_font widget op for runtime loading.
+    let font_bytes = toddy_renderer::settings::parse_inline_fonts(&settings);
+
     emit_hello("web", "wgpu", &[], "wasm")
         .map_err(|e| JsValue::from_str(&format!("failed to emit hello: {e}")))?;
 
-    // Build the app inside a Mutex so the Fn closure can move it out once.
-    let app_slot: std::sync::Mutex<Option<(serde_json::Value, toddy_core::app::ToddyAppBuilder)>> =
-        std::sync::Mutex::new(Some((settings, toddy_core::app::ToddyAppBuilder::new())));
+    type InitData = (
+        serde_json::Value,
+        toddy_core::app::ToddyAppBuilder,
+        Vec<Vec<u8>>,
+    );
+    let app_slot: std::sync::Mutex<Option<InitData>> = std::sync::Mutex::new(Some((
+        settings,
+        toddy_core::app::ToddyAppBuilder::new(),
+        font_bytes,
+    )));
 
-    // Start the iced daemon
     iced::daemon(
         move || {
-            let (settings, builder) = app_slot
+            let (settings, builder, fonts) = app_slot
                 .lock()
                 .expect("app_slot lock poisoned")
                 .take()
@@ -83,7 +96,6 @@ pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<
             let effect_handler = Box::new(WebEffectHandler);
             let mut app = App::new(dispatcher, effect_handler);
 
-            // Extract scale_factor before applying settings to Core.
             app.scale_factor = toddy_renderer::validate_scale_factor(
                 settings
                     .get("scale_factor")
@@ -104,7 +116,26 @@ pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<
                 }
             }
 
-            (app, iced::Task::none())
+            // Build font load tasks
+            let font_tasks: Vec<iced::Task<toddy_core::message::Message>> = fonts
+                .into_iter()
+                .map(|bytes| {
+                    iced::font::load(bytes).map(|result| {
+                        if let Err(e) = result {
+                            log::error!("font load error: {e:?}");
+                        }
+                        toddy_core::message::Message::NoOp
+                    })
+                })
+                .collect();
+
+            let task = if font_tasks.is_empty() {
+                iced::Task::none()
+            } else {
+                iced::Task::batch(font_tasks)
+            };
+
+            (app, task)
         },
         App::update,
         App::view_window,
@@ -113,6 +144,7 @@ pub async fn run_app(settings_json: &str, on_event: js_sys::Function) -> Result<
     .subscription(App::renderer_subscriptions)
     .theme(App::theme_for_window)
     .scale_factor(App::scale_factor_for_window)
+    .settings(iced_settings)
     .run()
     .map_err(|e| JsValue::from_str(&format!("iced error: {e}")))
 }

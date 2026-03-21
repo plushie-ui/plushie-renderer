@@ -264,11 +264,7 @@ impl App {
             "load_font" => {
                 let data = payload
                     .get("data")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| {
-                        use base64::Engine;
-                        base64::engine::general_purpose::STANDARD.decode(s).ok()
-                    })
+                    .and_then(crate::settings::decode_font_data)
                     .unwrap_or_default();
                 if data.is_empty() {
                     log::warn!("load_font: no font data provided");

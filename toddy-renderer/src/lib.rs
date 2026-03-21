@@ -16,6 +16,7 @@ pub mod emitters;
 pub mod events;
 pub mod message_processing;
 pub mod scripting;
+pub mod settings;
 pub mod subscriptions;
 pub mod update;
 pub mod view;

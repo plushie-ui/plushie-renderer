@@ -940,6 +940,12 @@ pub(crate) fn run(
 /// Headless mode has no Task runtime, so we load fonts directly into
 /// the global font system that the tiny-skia renderer uses.
 fn load_fonts_from_settings(settings: &serde_json::Value) {
+    // Load inline font data (base64 or binary).
+    for bytes in toddy_renderer::settings::parse_inline_fonts(settings) {
+        load_font_bytes(bytes);
+    }
+
+    // Load fonts from file paths (native only).
     let Some(fonts) = settings.get("fonts").and_then(|v| v.as_array()) else {
         return;
     };
@@ -967,38 +973,39 @@ const MAX_LOADED_FONTS: u32 = 256;
 /// Process-wide counter of runtime font loads (headless mode).
 static LOADED_FONT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-/// Load a font from a `load_font` WidgetOp payload (base64-encoded data).
+/// Load a font from a `load_font` WidgetOp payload (base64 or binary data).
 fn load_font_from_payload(payload: &serde_json::Value) {
-    let Some(data_str) = payload.get("data").and_then(|v| v.as_str()) else {
-        log::warn!("load_font: missing or invalid 'data' field");
+    let Some(data_val) = payload.get("data") else {
+        log::warn!("load_font: missing 'data' field");
         return;
     };
-    match base64::Engine::decode(&base64::prelude::BASE64_STANDARD, data_str) {
-        Ok(bytes) => {
-            if bytes.len() > MAX_FONT_BYTES {
-                log::warn!(
-                    "load_font: font data ({} bytes) exceeds {} byte limit, rejecting",
-                    bytes.len(),
-                    MAX_FONT_BYTES
-                );
-                return;
-            }
-            if LOADED_FONT_COUNT.load(std::sync::atomic::Ordering::Relaxed) >= MAX_LOADED_FONTS {
-                log::warn!(
-                    "load_font: already loaded {MAX_LOADED_FONTS} fonts, \
-                     rejecting to prevent unbounded memory growth"
-                );
-                return;
-            }
-            LOADED_FONT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let len = bytes.len();
-            load_font_bytes(bytes);
-            log::info!("loaded font from base64 ({len} bytes)");
-        }
-        Err(e) => {
-            log::error!("load_font: base64 decode error: {e}");
-        }
+    let Some(bytes) = toddy_renderer::settings::decode_font_data(data_val) else {
+        log::warn!("load_font: failed to decode font data");
+        return;
+    };
+    if bytes.is_empty() {
+        log::warn!("load_font: empty font data");
+        return;
     }
+    if bytes.len() > MAX_FONT_BYTES {
+        log::warn!(
+            "load_font: font data ({} bytes) exceeds {} byte limit, rejecting",
+            bytes.len(),
+            MAX_FONT_BYTES
+        );
+        return;
+    }
+    if LOADED_FONT_COUNT.load(std::sync::atomic::Ordering::Relaxed) >= MAX_LOADED_FONTS {
+        log::warn!(
+            "load_font: already loaded {MAX_LOADED_FONTS} fonts, \
+             rejecting to prevent unbounded memory growth"
+        );
+        return;
+    }
+    LOADED_FONT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let len = bytes.len();
+    load_font_bytes(bytes);
+    log::info!("loaded font ({len} bytes)");
 }
 
 /// Register font bytes with the global font system.
