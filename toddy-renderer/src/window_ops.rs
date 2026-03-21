@@ -12,7 +12,6 @@
 //! no visible effect.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
 
 use base64::Engine as _;
 use iced::{Point, Size, Task, window};
@@ -31,7 +30,7 @@ use crate::emitters::{emit_effect_response, emit_query_response};
 fn is_wayland() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        static IS_WAYLAND: OnceLock<bool> = OnceLock::new();
+        static IS_WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *IS_WAYLAND.get_or_init(|| std::env::var("WAYLAND_DISPLAY").is_ok())
     }
     #[cfg(target_arch = "wasm32")]

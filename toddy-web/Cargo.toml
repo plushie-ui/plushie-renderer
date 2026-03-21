@@ -1,0 +1,28 @@
+[package]
+name = "toddy-web"
+description = "WASM entry point for the toddy renderer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+toddy-core = { version = "0.3.1", path = "../toddy-core" }
+toddy-renderer = { version = "0.3.1", path = "../toddy-renderer" }
+iced = { version = "0.6", package = "toddy-iced", features = ["advanced", "canvas", "a11y"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+console_log = "1"
+wasmtimer = "0.4"
