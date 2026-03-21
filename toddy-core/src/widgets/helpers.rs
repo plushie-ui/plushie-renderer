@@ -1409,6 +1409,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_shaping_basic() {
+        let props = json!({"shaping": "basic"});
+        assert_eq!(
+            parse_shaping(props.as_object()),
+            Some(iced::widget::text::Shaping::Basic)
+        );
+    }
+
+    #[test]
+    fn parse_shaping_advanced() {
+        let props = json!({"shaping": "advanced"});
+        assert_eq!(
+            parse_shaping(props.as_object()),
+            Some(iced::widget::text::Shaping::Advanced)
+        );
+    }
+
+    #[test]
+    fn parse_shaping_missing() {
+        let props = json!({});
+        assert_eq!(parse_shaping(props.as_object()), None);
+    }
+
+    #[test]
     fn style_map_auto_derive_disabled_text() {
         let color = Color::from_rgba(1.0, 1.0, 1.0, 0.8);
         let result = auto_derive_disabled_text(color);

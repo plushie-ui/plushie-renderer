@@ -816,6 +816,15 @@ mod tests {
         assert_eq!(o.has_popup, Some(accessible::HasPopup::Menu));
     }
 
+    #[test]
+    fn from_a11y_value_parses_directly() {
+        let a11y = json!({"role": "button", "label": "Save", "disabled": true});
+        let result = A11yOverrides::from_a11y_value(&a11y).unwrap();
+        assert_eq!(result.role, Some(accessible::Role::Button));
+        assert_eq!(result.label.as_deref(), Some("Save"));
+        assert_eq!(result.disabled, Some(true));
+    }
+
     // -- parse helpers --------------------------------------------------------
 
     #[test]

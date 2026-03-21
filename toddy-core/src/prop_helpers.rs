@@ -766,6 +766,12 @@ mod tests {
     }
 
     #[test]
+    fn test_prop_color_rejects_object() {
+        let props = json!({"color": {"r": 1.0, "g": 0.0, "b": 0.0}});
+        assert_eq!(prop_color(props.as_object(), "color"), None);
+    }
+
+    #[test]
     fn test_prop_color_missing() {
         let p = make_props(json!({}));
         assert!(prop_color(p.as_object(), "bg").is_none());
