@@ -349,16 +349,19 @@ impl A11yOverrides {
 /// manually added here with appropriate string aliases. There is no
 /// compile-time exhaustiveness check since this maps from strings.
 fn parse_role(s: &str) -> Option<accessible::Role> {
+    // One canonical underscore form per role. Semantic aliases (different
+    // names for the same concept) are allowed where they map to toddy
+    // widget names. No spelling variants (no concatenated forms).
     let role = match s {
         "alert" => accessible::Role::Alert,
-        "alert_dialog" | "alertdialog" => accessible::Role::AlertDialog,
+        "alert_dialog" => accessible::Role::AlertDialog,
         "button" => accessible::Role::Button,
         "canvas" => accessible::Role::Canvas,
-        "checkbox" | "check_box" => accessible::Role::CheckBox,
-        "combo_box" | "combobox" => accessible::Role::ComboBox,
+        "check_box" => accessible::Role::CheckBox,
+        "combo_box" => accessible::Role::ComboBox,
         "dialog" => accessible::Role::Dialog,
         "document" => accessible::Role::Document,
-        "group" | "generic_container" | "generic" | "container" => accessible::Role::Group,
+        "group" => accessible::Role::Group,
         "heading" => accessible::Role::Heading,
         "image" => accessible::Role::Image,
         "label" => accessible::Role::Label,
@@ -371,10 +374,12 @@ fn parse_role(s: &str) -> Option<accessible::Role> {
         "meter" => accessible::Role::Meter,
         "multiline_text_input" | "text_editor" => accessible::Role::MultilineTextInput,
         "navigation" => accessible::Role::Navigation,
-        "progress_indicator" | "progressbar" => accessible::Role::ProgressIndicator,
-        "radio" | "radio_button" => accessible::Role::RadioButton,
+        // "progress_bar" alias: matches toddy's widget name.
+        "progress_indicator" | "progress_bar" => accessible::Role::ProgressIndicator,
+        // "radio" alias: universally understood short form.
+        "radio_button" | "radio" => accessible::Role::RadioButton,
         "region" => accessible::Role::Region,
-        "scrollbar" | "scroll_bar" => accessible::Role::ScrollBar,
+        "scroll_bar" => accessible::Role::ScrollBar,
         "scroll_view" => accessible::Role::ScrollView,
         "search" => accessible::Role::Search,
         "separator" => accessible::Role::Separator,
@@ -386,9 +391,10 @@ fn parse_role(s: &str) -> Option<accessible::Role> {
         "tab_list" => accessible::Role::TabList,
         "tab_panel" => accessible::Role::TabPanel,
         "table" => accessible::Role::Table,
-        "row" | "table_row" => accessible::Role::Row,
-        "cell" | "table_cell" => accessible::Role::Cell,
-        "column_header" | "columnheader" => accessible::Role::ColumnHeader,
+        // "row"/"cell" aliases: short forms for table contexts.
+        "table_row" | "row" => accessible::Role::Row,
+        "table_cell" | "cell" => accessible::Role::Cell,
+        "column_header" => accessible::Role::ColumnHeader,
         "text_input" => accessible::Role::TextInput,
         "toolbar" => accessible::Role::Toolbar,
         "tooltip" => accessible::Role::Tooltip,
@@ -814,22 +820,17 @@ mod tests {
 
     #[test]
     fn parse_role_covers_all_variants() {
+        // Canonical underscore forms for every role.
         let cases = [
             ("alert", accessible::Role::Alert),
             ("alert_dialog", accessible::Role::AlertDialog),
-            ("alertdialog", accessible::Role::AlertDialog),
             ("button", accessible::Role::Button),
             ("canvas", accessible::Role::Canvas),
-            ("checkbox", accessible::Role::CheckBox),
             ("check_box", accessible::Role::CheckBox),
             ("combo_box", accessible::Role::ComboBox),
-            ("combobox", accessible::Role::ComboBox),
             ("dialog", accessible::Role::Dialog),
             ("document", accessible::Role::Document),
             ("group", accessible::Role::Group),
-            ("generic_container", accessible::Role::Group),
-            ("generic", accessible::Role::Group),
-            ("container", accessible::Role::Group),
             ("heading", accessible::Role::Heading),
             ("image", accessible::Role::Image),
             ("label", accessible::Role::Label),
@@ -841,14 +842,10 @@ mod tests {
             ("menu_item", accessible::Role::MenuItem),
             ("meter", accessible::Role::Meter),
             ("multiline_text_input", accessible::Role::MultilineTextInput),
-            ("text_editor", accessible::Role::MultilineTextInput),
             ("navigation", accessible::Role::Navigation),
             ("progress_indicator", accessible::Role::ProgressIndicator),
-            ("progressbar", accessible::Role::ProgressIndicator),
-            ("radio", accessible::Role::RadioButton),
             ("radio_button", accessible::Role::RadioButton),
             ("region", accessible::Role::Region),
-            ("scrollbar", accessible::Role::ScrollBar),
             ("scroll_bar", accessible::Role::ScrollBar),
             ("scroll_view", accessible::Role::ScrollView),
             ("search", accessible::Role::Search),
@@ -861,12 +858,9 @@ mod tests {
             ("tab_list", accessible::Role::TabList),
             ("tab_panel", accessible::Role::TabPanel),
             ("table", accessible::Role::Table),
-            ("row", accessible::Role::Row),
             ("table_row", accessible::Role::Row),
-            ("cell", accessible::Role::Cell),
             ("table_cell", accessible::Role::Cell),
             ("column_header", accessible::Role::ColumnHeader),
-            ("columnheader", accessible::Role::ColumnHeader),
             ("text_input", accessible::Role::TextInput),
             ("toolbar", accessible::Role::Toolbar),
             ("tooltip", accessible::Role::Tooltip),
@@ -877,6 +871,23 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(parse_role(input), Some(expected), "parse_role({input:?})");
         }
+        // Semantic aliases (different names, not spelling variants).
+        assert_eq!(parse_role("radio"), Some(accessible::Role::RadioButton));
+        assert_eq!(
+            parse_role("text_editor"),
+            Some(accessible::Role::MultilineTextInput)
+        );
+        assert_eq!(
+            parse_role("progress_bar"),
+            Some(accessible::Role::ProgressIndicator)
+        );
+        assert_eq!(parse_role("row"), Some(accessible::Role::Row));
+        assert_eq!(parse_role("cell"), Some(accessible::Role::Cell));
+        // Concatenated forms are NOT accepted (one canonical form only).
+        assert_eq!(parse_role("alertdialog"), None);
+        assert_eq!(parse_role("combobox"), None);
+        assert_eq!(parse_role("listitem"), None);
+        assert_eq!(parse_role("menubar"), None);
         assert_eq!(parse_role("unknown_thing"), None);
     }
 
