@@ -91,7 +91,7 @@ pub fn decode_font_data(value: &Value) -> Option<Vec<u8>> {
         Value::Array(arr) => {
             let bytes: Vec<u8> = arr
                 .iter()
-                .filter_map(|v| v.as_u64().map(|n| n as u8))
+                .filter_map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
                 .collect();
             if bytes.len() == arr.len() {
                 Some(bytes)
