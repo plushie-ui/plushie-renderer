@@ -37,7 +37,7 @@ use crate::emitters::message_to_event;
 /// Both the daemon and headless modes call this with references to their
 /// respective state. The caller is responsible for emitting the returned
 /// events (stdout, WireWriter, etc.).
-pub(crate) fn process_widget_message(
+pub fn process_widget_message(
     msg: Message,
     caches: &mut WidgetCaches,
     dispatcher: &mut ExtensionDispatcher,

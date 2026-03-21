@@ -40,7 +40,7 @@ async fn platform_sleep(duration: Duration) {
 
 /// Identifies a stream of events that can be coalesced together.
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub(crate) enum CoalesceKey {
+pub enum CoalesceKey {
     /// Subscription event keyed by subscription kind (e.g. "on_mouse_move").
     Subscription(String),
     /// Widget event keyed by (widget_id, event_family).
@@ -134,7 +134,7 @@ impl PendingEvent {
 /// Sits between the iced message handlers and the wire protocol. Events
 /// classified as coalescable are buffered and emitted at a controlled
 /// rate; non-coalescable events flush the buffer and emit immediately.
-pub(crate) struct EventEmitter {
+pub struct EventEmitter {
     /// Pending coalescable events, keyed by coalesce key.
     pending: HashMap<CoalesceKey, PendingEvent>,
     /// Timestamp of last emission per coalesce key.
@@ -147,6 +147,12 @@ pub(crate) struct EventEmitter {
     subscription_rates: HashMap<String, u32>,
     /// Per-widget rates from event_rate prop.
     widget_rates: HashMap<String, u32>,
+}
+
+impl Default for EventEmitter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EventEmitter {
@@ -348,7 +354,7 @@ impl EventEmitter {
 }
 
 /// Build a CoalesceKey for a widget event.
-pub(crate) fn widget_coalesce_key(event: &OutgoingEvent) -> CoalesceKey {
+pub fn widget_coalesce_key(event: &OutgoingEvent) -> CoalesceKey {
     CoalesceKey::Widget(event.id.clone(), event.family.clone())
 }
 
@@ -358,8 +364,9 @@ pub(crate) fn widget_coalesce_key(event: &OutgoingEvent) -> CoalesceKey {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use super::*;
     use serde_json::json;
+    use toddy_core::protocol::{CoalesceHint, OutgoingEvent};
 
     fn make_event(family: &str, id: &str) -> OutgoingEvent {
         OutgoingEvent {

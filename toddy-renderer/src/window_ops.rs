@@ -52,7 +52,7 @@ fn warn_wayland_noop(op: &str) {
 // ---------------------------------------------------------------------------
 
 impl App {
-    pub(crate) fn handle_window_op(
+    pub fn handle_window_op(
         &mut self,
         op: &str,
         window_id: &str,
@@ -732,7 +732,7 @@ impl App {
 
     /// Compare the set of window nodes in the tree against the currently open
     /// windows and open/close as needed.
-    pub(crate) fn sync_windows(&mut self) -> Task<Message> {
+    pub fn sync_windows(&mut self) -> Task<Message> {
         let tree_windows: HashSet<String> = self.core.tree.window_ids().into_iter().collect();
         let open_windows: HashSet<String> = self.windows.toddy_ids().cloned().collect();
 
@@ -765,7 +765,7 @@ impl App {
     }
 
     /// Build window::Settings from a window node's props.
-    pub(crate) fn window_settings_for(&self, toddy_id: &str) -> window::Settings {
+    pub fn window_settings_for(&self, toddy_id: &str) -> window::Settings {
         if let Some(node) = self.core.tree.find_window(toddy_id) {
             parse_window_settings(&node.props)
         } else {
@@ -785,7 +785,7 @@ impl App {
 const MAX_WINDOW_DIM: f32 = 16384.0;
 
 /// Parse a full `window::Settings` from a JSON value (node props or op settings).
-pub(crate) fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
+pub fn parse_window_settings(v: &serde_json::Value) -> window::Settings {
     let mut width = v.get("width").and_then(|v| v.as_f64()).unwrap_or(800.0) as f32;
     let mut height = v.get("height").and_then(|v| v.as_f64()).unwrap_or(600.0) as f32;
     if !(1.0..=MAX_WINDOW_DIM).contains(&width) {
@@ -920,7 +920,8 @@ fn parse_direction(s: &str) -> window::Direction {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use super::*;
+    use iced::{Size, window};
     use serde_json::json;
 
     #[test]

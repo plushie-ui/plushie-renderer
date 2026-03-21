@@ -20,9 +20,8 @@
 
 mod effects;
 mod headless;
-mod message_processing;
+mod output;
 mod renderer;
-mod scripting;
 pub(crate) mod transport;
 
 /// Entry point for the toddy renderer.

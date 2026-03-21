@@ -12,7 +12,7 @@ use crate::emitter::CoalesceKey;
 use crate::emitters::{self, emit_event, emit_screenshot_response};
 
 impl App {
-    pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Stdin(event) => self.handle_stdin(event),
             Message::NoOp => Task::none(),
@@ -214,7 +214,7 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_stdin(&mut self, event: StdinEvent) -> Task<Message> {
+    pub fn handle_stdin(&mut self, event: StdinEvent) -> Task<Message> {
         match event {
             StdinEvent::Message(incoming) => {
                 // Flush pending coalesced events on any incoming message.

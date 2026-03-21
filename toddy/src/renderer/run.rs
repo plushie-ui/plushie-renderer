@@ -3,14 +3,15 @@
 
 use std::sync::Mutex;
 
-use iced::Task;
+use iced::{Subscription, Task};
 
 use toddy_core::codec::Codec;
 use toddy_core::message::{Message, StdinEvent};
 use toddy_core::protocol::IncomingMessage;
 
-use super::App;
-use super::emitters::emit_hello;
+use toddy_renderer::App;
+use toddy_renderer::emitters::emit_hello;
+
 use super::stdin::{STDIN_RX, read_initial_settings, spawn_stdin_reader};
 
 pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
@@ -64,16 +65,12 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
     let (reader, writer, _transport_guard) = transport.into_parts();
 
     // Initialize the global output writer before any protocol I/O.
-    // Headless/mock modes get the raw writer (events are host-paced,
-    // no GUI stall risk). Windowed mode gets a ChannelWriter backed
-    // by a background thread so the iced event loop never blocks on
-    // pipe writes. The decision happens below after mode detection.
     let is_headless = has_flag("--headless") || has_flag("--mock");
     if is_headless {
-        crate::renderer::emitters::init_output(writer);
+        toddy_renderer::emitters::init_output(writer);
     } else {
-        let channel_writer = crate::renderer::emitters::spawn_writer_thread(writer);
-        crate::renderer::emitters::init_output(Box::new(channel_writer));
+        let channel_writer = crate::output::spawn_writer_thread(writer);
+        toddy_renderer::emitters::init_output(Box::new(channel_writer));
     }
 
     // Collect extension keys before building the dispatcher so the hello
@@ -110,22 +107,18 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
     }
 
     // Read the first message synchronously to get iced settings and font
-    // data before the daemon starts. This must happen before the stdin
-    // reader thread is spawned.
+    // data before the daemon starts.
     let (initial_settings, iced_settings, font_bytes, reader) =
         read_initial_settings(forced_codec, reader);
 
-    // Send the hello handshake before any other output. The codec is set
-    // inside read_initial_settings, so it's safe to emit framed messages now.
+    // Send the hello handshake before any other output.
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
     if let Err(e) = emit_hello("windowed", "wgpu", &ext_key_refs, transport_name) {
         log::error!("failed to emit hello: {e}");
         return Ok(());
     }
 
-    // Spawn stdin reader thread with tokio channel. The receiver goes into
-    // STDIN_RX so the subscription (which is a fn pointer, not a closure)
-    // can take it once on first call.
+    // Spawn stdin reader thread with tokio channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<StdinEvent>(64);
     spawn_stdin_reader(tx, reader);
     *STDIN_RX.lock().expect("STDIN_RX lock poisoned") = Some(rx);
@@ -148,10 +141,12 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
                 .take()
                 .expect("daemon init closure called more than once")
                 .build_dispatcher();
-            let mut app = App::new(dispatcher);
+
+            let effect_handler = Box::new(crate::effects::NativeEffectHandler);
+            let mut app = App::new(dispatcher, effect_handler);
 
             // Extract scale_factor before applying settings to Core
-            app.scale_factor = super::app::validate_scale_factor(
+            app.scale_factor = toddy_renderer::app::validate_scale_factor(
                 settings
                     .get("scale_factor")
                     .and_then(|v| v.as_f64())
@@ -159,8 +154,7 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
                     .unwrap_or(1.0),
             );
 
-            // Apply initial settings to Core. Handle any effects (e.g.
-            // ExtensionConfig when the Settings includes extension_config).
+            // Apply initial settings to Core.
             let effects = app.core.apply(IncomingMessage::Settings { settings });
             for effect in effects {
                 match effect {
@@ -203,7 +197,12 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
         App::view_window,
     )
     .title(App::title_for_window)
-    .subscription(App::subscription)
+    .subscription(|app: &App| {
+        Subscription::batch([
+            app.renderer_subscriptions(),
+            Subscription::run(super::stdin::stdin_subscription).map(Message::Stdin),
+        ])
+    })
     .theme(App::theme_for_window)
     .scale_factor(App::scale_factor_for_window)
     .settings(iced_settings)
@@ -211,21 +210,14 @@ pub(crate) fn run(builder: toddy_core::app::ToddyAppBuilder) -> iced::Result {
 }
 
 /// Switch stdin and stdout to binary mode on Windows.
-///
-/// Without this, the CRT translates `\n` to `\r\n` on write and `\r\n`
-/// to `\n` on read. That breaks both MessagePack length-prefixed framing
-/// and any binary payload (screenshots, font data, image bytes).
 #[cfg(windows)]
-#[allow(unsafe_code)] // Required for CRT _setmode FFI -- no safe alternative.
+#[allow(unsafe_code)]
 fn set_binary_mode() {
     extern "C" {
         fn _setmode(fd: i32, mode: i32) -> i32;
     }
     const O_BINARY: i32 = 0x8000;
 
-    // _setmode takes C runtime file descriptors (small integers), not
-    // Win32 HANDLEs. stdin and stdout are always fd 0 and 1 per the
-    // C standard and MSVC/MinGW CRT guarantees.
     unsafe {
         _setmode(0, O_BINARY);
         _setmode(1, O_BINARY);

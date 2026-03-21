@@ -32,11 +32,7 @@ impl App {
     /// Dispatch a widget operation by name. Called when Core produces a
     /// `WidgetOp` effect. Returns an iced `Task` for operations that
     /// need async completion (focus, scroll, font load).
-    pub(crate) fn handle_widget_op(
-        &mut self,
-        op: &str,
-        payload: &serde_json::Value,
-    ) -> Task<Message> {
+    pub fn handle_widget_op(&mut self, op: &str, payload: &serde_json::Value) -> Task<Message> {
         let get_target = || {
             payload
                 .get("target")
@@ -352,7 +348,7 @@ impl App {
 
     /// Apply an image operation (create, update, remove) to the
     /// in-memory image registry. Emits an error event on failure.
-    pub(crate) fn handle_image_op(
+    pub fn handle_image_op(
         &mut self,
         op: &str,
         handle: &str,
@@ -383,7 +379,7 @@ impl App {
 // ---------------------------------------------------------------------------
 
 /// Find a pane_grid::Pane by its toddy ID string.
-pub(crate) fn find_pane_by_toddy_id(
+pub fn find_pane_by_toddy_id(
     state: &pane_grid::State<String>,
     toddy_id: &str,
 ) -> Option<pane_grid::Pane> {

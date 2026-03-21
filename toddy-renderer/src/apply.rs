@@ -3,17 +3,14 @@
 
 use std::io;
 
-use iced::Task;
-
 use toddy_core::engine::CoreEffect;
-use toddy_core::message::Message;
 use toddy_core::protocol::IncomingMessage;
 
 use crate::App;
 use crate::emitters::{emit_effect_response, emit_event};
 
 impl App {
-    pub(crate) fn apply(&mut self, message: IncomingMessage) -> io::Result<()> {
+    pub fn apply(&mut self, message: IncomingMessage) -> io::Result<()> {
         // Extension commands bypass the normal tree update / diff / patch cycle.
         match &message {
             IncomingMessage::ExtensionCommand {
@@ -103,7 +100,8 @@ impl App {
                         let task = self.effect_handler.spawn_async(request_id, kind, payload);
                         self.pending_tasks.push(task);
                     } else if let Some(response) =
-                        self.effect_handler.handle_sync(&request_id, &kind, &payload)
+                        self.effect_handler
+                            .handle_sync(&request_id, &kind, &payload)
                     {
                         emit_effect_response(response)?;
                     }

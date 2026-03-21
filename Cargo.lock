@@ -4387,6 +4387,7 @@ dependencies = [
  "toddy-core",
  "toddy-iced",
  "toddy-iced-test",
+ "toddy-renderer",
  "tokio",
 ]
 

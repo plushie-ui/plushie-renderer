@@ -25,7 +25,7 @@ fn startup_exit(codec: &Codec, message: &str) -> ! {
     if let Ok(bytes) = codec.encode(&error) {
         // write_output falls back to stdout if init_output hasn't been
         // called yet, so this is safe at any point during startup.
-        let _ = super::emitters::write_output(&bytes);
+        let _ = toddy_renderer::emitters::write_output(&bytes);
     }
     std::process::exit(1);
 }

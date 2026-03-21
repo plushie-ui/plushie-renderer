@@ -506,6 +506,46 @@ fn handle_notification(id: String, payload: &Value) -> EffectResponse {
 }
 
 // ---------------------------------------------------------------------------
+// NativeEffectHandler -- EffectHandler trait impl for the native binary
+// ---------------------------------------------------------------------------
+
+/// Native effect handler wrapping the platform-specific implementations
+/// in this module (rfd file dialogs, arboard clipboard, notify-rust).
+pub(crate) struct NativeEffectHandler;
+
+impl toddy_renderer::EffectHandler for NativeEffectHandler {
+    fn handle_sync(
+        &self,
+        id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Option<toddy_core::protocol::EffectResponse> {
+        Some(handle_effect(id.to_string(), kind, payload))
+    }
+
+    fn spawn_async(
+        &self,
+        id: String,
+        kind: String,
+        payload: serde_json::Value,
+    ) -> iced::Task<toddy_core::message::Message> {
+        iced::Task::perform(
+            async move { handle_async_effect(id, &kind, &payload).await },
+            |response| {
+                if let Err(e) = toddy_renderer::emitters::emit_effect_response(response) {
+                    log::error!("write error in async effect: {e}");
+                }
+                toddy_core::message::Message::NoOp
+            },
+        )
+    }
+
+    fn is_async(&self, kind: &str) -> bool {
+        is_async_effect(kind)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

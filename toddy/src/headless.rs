@@ -37,7 +37,7 @@ use toddy_core::image_registry::ImageRegistry;
 use toddy_core::message::Message;
 use toddy_core::protocol::{IncomingMessage, OutgoingEvent, SessionMessage};
 
-use crate::scripting::{interaction_to_iced_events, resolve_widget_id};
+use toddy_renderer::scripting::{interaction_to_iced_events, resolve_widget_id};
 
 /// Default screenshot width when not specified by the caller.
 const DEFAULT_SCREENSHOT_WIDTH: u32 = 1024;
@@ -112,7 +112,7 @@ impl WireWriter {
 
     fn write_bytes(&self, bytes: &[u8]) -> io::Result<()> {
         match &self.inner {
-            WriterInner::Stdout => crate::renderer::write_output(bytes),
+            WriterInner::Stdout => toddy_renderer::emitters::write_output(bytes),
             WriterInner::Channel(tx) => tx
                 .send(bytes.to_vec())
                 .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "writer channel closed")),
@@ -414,7 +414,7 @@ impl Session {
     fn process_captured_messages(&mut self, messages: Vec<Message>) -> Vec<OutgoingEvent> {
         let mut events = Vec::new();
         for msg in messages {
-            events.extend(crate::message_processing::process_widget_message(
+            events.extend(toddy_renderer::message_processing::process_widget_message(
                 msg,
                 &mut self.core.caches,
                 &mut self.dispatcher,
@@ -507,7 +507,7 @@ fn handle_message(
                         if let Some(tag) = s
                             .core
                             .active_subscriptions
-                            .get(crate::renderer::constants::SUB_THEME_CHANGE)
+                            .get(toddy_renderer::constants::SUB_THEME_CHANGE)
                         {
                             let _ = s.writer.emit(
                                 &toddy_core::protocol::OutgoingEvent::theme_changed(
@@ -615,8 +615,9 @@ fn handle_message(
             target,
             selector,
         } => {
-            let resp = crate::scripting::build_query_response(&s.core, id, target, selector)
-                .with_session(session_id);
+            let resp =
+                toddy_renderer::scripting::build_query_response(&s.core, id, target, selector)
+                    .with_session(session_id);
             s.writer.emit(&resp)?;
         }
         IncomingMessage::Interact {
@@ -650,7 +651,7 @@ fn handle_message(
                     // equivalent (paste, sort, canvas, slide, etc.).
                     // Fall back to synthetic events in the final
                     // response (no steps were emitted).
-                    crate::scripting::build_interact_response(
+                    toddy_renderer::scripting::build_interact_response(
                         &s.core,
                         id.clone(),
                         action,
@@ -662,7 +663,7 @@ fn handle_message(
             } else {
                 // Mock mode (no UI) or action with no iced events:
                 // use synthetic event construction.
-                crate::scripting::build_interact_response(
+                toddy_renderer::scripting::build_interact_response(
                     &s.core,
                     id.clone(),
                     action,
@@ -677,7 +678,7 @@ fn handle_message(
             s.writer.emit(&resp)?;
         }
         IncomingMessage::TreeHash { id, name, .. } => {
-            let resp = crate::scripting::build_tree_hash_response(&s.core, id, name)
+            let resp = toddy_renderer::scripting::build_tree_hash_response(&s.core, id, name)
                 .with_session(session_id);
             s.writer.emit(&resp)?;
         }
@@ -705,8 +706,8 @@ fn handle_message(
                 ui_state.cursor = mouse::Cursor::Unavailable;
             }
             s.rebuild_renderer();
-            let resp =
-                crate::scripting::build_reset_response(&mut s.core, id).with_session(session_id);
+            let resp = toddy_renderer::scripting::build_reset_response(&mut s.core, id)
+                .with_session(session_id);
             s.writer.emit(&resp)?;
         }
         IncomingMessage::ExtensionCommand {
@@ -738,7 +739,7 @@ fn handle_message(
             if let Some(tag) = s
                 .core
                 .active_subscriptions
-                .get(crate::renderer::constants::SUB_ANIMATION_FRAME)
+                .get(toddy_renderer::constants::SUB_ANIMATION_FRAME)
             {
                 s.writer.emit(
                     &toddy_core::protocol::OutgoingEvent::animation_frame(
@@ -913,7 +914,9 @@ pub(crate) fn run(
         Mode::Mock => ("mock", "none"),
     };
     let ext_key_refs: Vec<&str> = ext_keys.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = crate::renderer::emit_hello(mode_str, backend, &ext_key_refs, transport_name) {
+    if let Err(e) =
+        toddy_renderer::emitters::emit_hello(mode_str, backend, &ext_key_refs, transport_name)
+    {
         log::error!("failed to emit hello: {e}");
         return;
     }
@@ -955,7 +958,7 @@ fn load_fonts_from_settings(settings: &serde_json::Value) {
     }
 }
 
-use crate::renderer::constants::MAX_FONT_BYTES;
+use toddy_renderer::constants::MAX_FONT_BYTES;
 
 /// Maximum number of runtime font loads per process lifetime. Each
 /// load permanently leaks font bytes into the global font system.
@@ -1077,7 +1080,7 @@ fn run_multiplexed(
     let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(256);
     let writer_handle = thread::spawn(move || {
         for bytes in writer_rx {
-            if crate::renderer::write_output(&bytes).is_err() {
+            if toddy_renderer::emitters::write_output(&bytes).is_err() {
                 break;
             }
         }

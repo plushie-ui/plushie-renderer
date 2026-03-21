@@ -30,15 +30,21 @@ impl Default for WindowState {
 /// Bidirectional toddy ID <-> iced window::Id mapping with per-window
 /// state. All mutations keep both maps in sync -- callers cannot
 /// accidentally desync the forward and reverse maps.
-pub(crate) struct WindowMap {
+pub struct WindowMap {
     /// Toddy window ID -> (iced window ID, per-window state).
     forward: HashMap<String, (window::Id, WindowState)>,
     /// Iced window ID -> toddy window ID.
     reverse: HashMap<window::Id, String>,
 }
 
+impl Default for WindowMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WindowMap {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             forward: HashMap::new(),
             reverse: HashMap::new(),
@@ -48,7 +54,7 @@ impl WindowMap {
     /// Insert a new window mapping. If the toddy_id already exists,
     /// the old iced_id is removed from the reverse map to prevent
     /// dangling entries.
-    pub(crate) fn insert(&mut self, toddy_id: String, iced_id: window::Id) {
+    pub fn insert(&mut self, toddy_id: String, iced_id: window::Id) {
         if let Some((old_iced_id, _)) = self.forward.get(&toddy_id) {
             self.reverse.remove(old_iced_id);
         }
@@ -57,7 +63,7 @@ impl WindowMap {
         self.reverse.insert(iced_id, toddy_id);
     }
 
-    pub(crate) fn remove_by_iced(&mut self, iced_id: &window::Id) -> Option<String> {
+    pub fn remove_by_iced(&mut self, iced_id: &window::Id) -> Option<String> {
         if let Some(toddy_id) = self.reverse.remove(iced_id) {
             self.forward.remove(&toddy_id);
             Some(toddy_id)
@@ -66,7 +72,7 @@ impl WindowMap {
         }
     }
 
-    pub(crate) fn remove_by_toddy(&mut self, toddy_id: &str) -> Option<window::Id> {
+    pub fn remove_by_toddy(&mut self, toddy_id: &str) -> Option<window::Id> {
         if let Some((iced_id, _)) = self.forward.remove(toddy_id) {
             self.reverse.remove(&iced_id);
             Some(iced_id)
@@ -75,51 +81,51 @@ impl WindowMap {
         }
     }
 
-    pub(crate) fn contains_toddy(&self, toddy_id: &str) -> bool {
+    pub fn contains_toddy(&self, toddy_id: &str) -> bool {
         self.forward.contains_key(toddy_id)
     }
 
-    pub(crate) fn get_iced(&self, toddy_id: &str) -> Option<&window::Id> {
+    pub fn get_iced(&self, toddy_id: &str) -> Option<&window::Id> {
         self.forward.get(toddy_id).map(|(id, _)| id)
     }
 
-    pub(crate) fn get_toddy(&self, iced_id: &window::Id) -> Option<&String> {
+    pub fn get_toddy(&self, iced_id: &window::Id) -> Option<&String> {
         self.reverse.get(iced_id)
     }
 
     /// Resolve toddy ID from iced ID, returning empty string if not found.
-    pub(crate) fn toddy_id_for(&self, iced_id: &window::Id) -> String {
+    pub fn toddy_id_for(&self, iced_id: &window::Id) -> String {
         self.reverse.get(iced_id).cloned().unwrap_or_default()
     }
 
-    pub(crate) fn iced_ids(&self) -> impl Iterator<Item = &window::Id> {
+    pub fn iced_ids(&self) -> impl Iterator<Item = &window::Id> {
         self.reverse.keys()
     }
 
-    pub(crate) fn toddy_ids(&self) -> impl Iterator<Item = &String> {
+    pub fn toddy_ids(&self) -> impl Iterator<Item = &String> {
         self.forward.keys()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.forward.is_empty()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &window::Id)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &window::Id)> {
         self.forward.iter().map(|(jid, (iid, _))| (jid, iid))
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.forward.clear();
         self.reverse.clear();
     }
 
     // -- Per-window decoration state --
 
-    pub(crate) fn is_decorated(&self, toddy_id: &str) -> bool {
+    pub fn is_decorated(&self, toddy_id: &str) -> bool {
         self.forward.get(toddy_id).is_none_or(|(_, s)| s.decorated)
     }
 
-    pub(crate) fn set_decorated(&mut self, toddy_id: &str, decorated: bool) {
+    pub fn set_decorated(&mut self, toddy_id: &str, decorated: bool) {
         if let Some((_, state)) = self.forward.get_mut(toddy_id) {
             state.decorated = decorated;
         }
@@ -127,19 +133,19 @@ impl WindowMap {
 
     // -- Per-window theme cache --
 
-    pub(crate) fn cached_theme(&self, toddy_id: &str) -> Option<&Theme> {
+    pub fn cached_theme(&self, toddy_id: &str) -> Option<&Theme> {
         self.forward
             .get(toddy_id)
             .and_then(|(_, s)| s.theme.as_ref())
     }
 
-    pub(crate) fn set_theme(&mut self, toddy_id: &str, theme: Option<Theme>) {
+    pub fn set_theme(&mut self, toddy_id: &str, theme: Option<Theme>) {
         if let Some((_, state)) = self.forward.get_mut(toddy_id) {
             state.theme = theme;
         }
     }
 
-    pub(crate) fn clear_theme_cache(&mut self) {
+    pub fn clear_theme_cache(&mut self) {
         for (_, state) in self.forward.values_mut() {
             state.theme = None;
         }

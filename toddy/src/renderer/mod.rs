@@ -1,27 +1,11 @@
-//! iced::daemon application: the main rendering loop.
+//! iced::daemon application entry point.
 //!
-//! `App` owns the [`Core`](toddy_core::engine::Core) state, reads
-//! messages from stdin, renders the UI tree, and emits events to
-//! stdout. Submodules handle stdin I/O, window operations, widget
-//! operations, and event emission.
+//! The core renderer logic lives in the `toddy-renderer` crate. This
+//! module provides the native entry point (`run`) and stdin I/O, then
+//! delegates to toddy-renderer for the iced daemon, event handling,
+//! and output.
 
-mod app;
-mod apply;
-pub(crate) mod constants;
-mod emitter;
-mod events;
 mod run;
-mod subscriptions;
-mod update;
-mod view;
-mod window_map;
+pub(crate) mod stdin;
 
-pub(crate) mod emitters;
-mod stdin;
-mod widget_ops;
-mod window_ops;
-
-pub(crate) use emitters::{emit_hello, write_output};
 pub(crate) use run::run;
-
-use app::App;

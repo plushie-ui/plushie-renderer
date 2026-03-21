@@ -115,20 +115,14 @@ pub fn emit_hello(
 // ---------------------------------------------------------------------------
 
 /// Encode and write an [`EffectResponse`](toddy_core::protocol::EffectResponse).
-pub fn emit_effect_response(
-    response: toddy_core::protocol::EffectResponse,
-) -> io::Result<()> {
+pub fn emit_effect_response(response: toddy_core::protocol::EffectResponse) -> io::Result<()> {
     let codec = Codec::get_global();
     let bytes = codec.encode(&response).map_err(io::Error::other)?;
     write_output(&bytes)
 }
 
 /// Emit a query_response message.
-pub fn emit_query_response(
-    kind: &str,
-    tag: &str,
-    data: serde_json::Value,
-) -> io::Result<()> {
+pub fn emit_query_response(kind: &str, tag: &str, data: serde_json::Value) -> io::Result<()> {
     let msg = serde_json::json!({
         "type": "op_query_response",
         "session": "",

@@ -34,7 +34,7 @@ const MAX_SEARCH_DEPTH: usize = 256;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub(crate) enum Selector {
+pub enum Selector {
     Id(String),
     Text(String),
     Role(String),
@@ -42,7 +42,7 @@ pub(crate) enum Selector {
     Focused,
 }
 
-pub(crate) fn parse_selector(selector: &Value) -> Option<Selector> {
+pub fn parse_selector(selector: &Value) -> Option<Selector> {
     let by = selector.get("by")?.as_str()?;
     match by {
         "focused" => Some(Selector::Focused),
@@ -69,7 +69,7 @@ pub(crate) fn parse_selector(selector: &Value) -> Option<Selector> {
 /// 1. Explicit modifiers map: `{"key": "s", "modifiers": {"ctrl": true, ...}}`
 /// 2. Combined key string: `{"key": "ctrl+s"}` -- splits on `+` and extracts
 ///    modifier prefixes (ctrl/command, shift, alt, logo/super/meta).
-pub(crate) fn parse_key_and_modifiers(
+pub fn parse_key_and_modifiers(
     payload: Option<&serde_json::Map<String, Value>>,
 ) -> (String, Value) {
     let empty_map = serde_json::Map::new();
@@ -128,7 +128,7 @@ pub(crate) fn parse_key_and_modifiers(
 /// Convert a key name string (as sent by the scripting protocol) to an iced
 /// `keyboard::Key`. Named keys use their Debug format (e.g. "Enter",
 /// "Tab", "ArrowUp"); single characters become `Key::Character`.
-pub(crate) fn parse_iced_key(name: &str) -> Key {
+pub fn parse_iced_key(name: &str) -> Key {
     match name {
         "Enter" | "enter" | "Return" | "return" => Key::Named(keyboard::key::Named::Enter),
         "Tab" | "tab" => Key::Named(keyboard::key::Named::Tab),
@@ -170,7 +170,7 @@ pub(crate) fn parse_iced_key(name: &str) -> Key {
 }
 
 /// Build iced `Modifiers` from parsed scripting protocol modifiers JSON.
-pub(crate) fn parse_iced_modifiers(mods: &Value) -> Modifiers {
+pub fn parse_iced_modifiers(mods: &Value) -> Modifiers {
     let mut m = Modifiers::empty();
     if mods.get("shift").and_then(|v| v.as_bool()).unwrap_or(false) {
         m |= Modifiers::SHIFT;
@@ -188,7 +188,7 @@ pub(crate) fn parse_iced_modifiers(mods: &Value) -> Modifiers {
 }
 
 /// Build a KeyPressed iced event.
-pub(crate) fn make_key_pressed(key: Key, modifiers: Modifiers, text: Option<SmolStr>) -> Event {
+pub fn make_key_pressed(key: Key, modifiers: Modifiers, text: Option<SmolStr>) -> Event {
     Event::Keyboard(keyboard::Event::KeyPressed {
         key: key.clone(),
         modified_key: key,
@@ -203,7 +203,7 @@ pub(crate) fn make_key_pressed(key: Key, modifiers: Modifiers, text: Option<Smol
 }
 
 /// Build a KeyReleased iced event.
-pub(crate) fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
+pub fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
     Event::Keyboard(keyboard::Event::KeyReleased {
         key: key.clone(),
         modified_key: key,
@@ -223,7 +223,7 @@ pub(crate) fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
 ///
 /// Returns an empty vec for action types that don't map to iced events
 /// (synthetic-only actions like paste, sort, pane_focus_cycle, slide).
-pub(crate) fn interaction_to_iced_events(
+pub fn interaction_to_iced_events(
     action: &str,
     _widget_id: Option<&str>,
     payload: &Value,
@@ -368,7 +368,7 @@ pub(crate) fn interaction_to_iced_events(
 // ---------------------------------------------------------------------------
 
 /// Write a serialized response using the negotiated wire codec.
-pub(crate) fn emit_wire<T: serde::Serialize>(value: &T) -> io::Result<()> {
+pub fn emit_wire<T: serde::Serialize>(value: &T) -> io::Result<()> {
     let codec = Codec::get_global();
     let bytes = codec.encode(value).map_err(io::Error::other)?;
     crate::emitters::write_output(&bytes)
@@ -467,35 +467,35 @@ fn is_focused(node: &TreeNode) -> bool {
 
 // -- Public API (node as Value) ---------------------------------------------
 
-pub(crate) fn find_node_by_id(core: &Core, widget_id: &str) -> Value {
+pub fn find_node_by_id(core: &Core, widget_id: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| n.id == widget_id, &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub(crate) fn find_node_by_text(core: &Core, text: &str) -> Value {
+pub fn find_node_by_text(core: &Core, text: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| matches_text(n, text), &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub(crate) fn find_node_by_role(core: &Core, role: &str) -> Value {
+pub fn find_node_by_role(core: &Core, role: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| matches_role(n, role), &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub(crate) fn find_node_by_label(core: &Core, label: &str) -> Value {
+pub fn find_node_by_label(core: &Core, label: &str) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &|n| matches_label(n, label), &node_to_value))
         .unwrap_or(Value::Null)
 }
 
-pub(crate) fn find_focused_node(core: &Core) -> Value {
+pub fn find_focused_node(core: &Core) -> Value {
     core.tree
         .root()
         .and_then(|root| search_tree(root, 0, &is_focused, &node_to_value))
@@ -504,19 +504,19 @@ pub(crate) fn find_focused_node(core: &Core) -> Value {
 
 // -- Public API (ID only) ---------------------------------------------------
 
-pub(crate) fn find_id_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<String> {
+pub fn find_id_by_text(node: &TreeNode, text: &str, depth: usize) -> Option<String> {
     search_tree(node, depth, &|n| matches_text(n, text), &node_id)
 }
 
-pub(crate) fn find_id_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<String> {
+pub fn find_id_by_role(node: &TreeNode, role: &str, depth: usize) -> Option<String> {
     search_tree(node, depth, &|n| matches_role(n, role), &node_id)
 }
 
-pub(crate) fn find_id_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<String> {
+pub fn find_id_by_label(node: &TreeNode, label: &str, depth: usize) -> Option<String> {
     search_tree(node, depth, &|n| matches_label(n, label), &node_id)
 }
 
-pub(crate) fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
+pub fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
     search_tree(node, depth, &is_focused, &node_id)
 }
 
@@ -525,7 +525,7 @@ pub(crate) fn find_id_focused(node: &TreeNode, depth: usize) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Build a QueryResponse without writing it anywhere.
-pub(crate) fn build_query_response(
+pub fn build_query_response(
     core: &Core,
     id: String,
     target: String,
@@ -554,17 +554,12 @@ pub(crate) fn build_query_response(
 }
 
 /// Build and emit a QueryResponse to stdout.
-pub(crate) fn handle_query(
-    core: &Core,
-    id: String,
-    target: String,
-    selector: Value,
-) -> io::Result<()> {
+pub fn handle_query(core: &Core, id: String, target: String, selector: Value) -> io::Result<()> {
     emit_wire(&build_query_response(core, id, target, selector))
 }
 
 /// Resolve a selector to a widget ID without emitting anything.
-pub(crate) fn resolve_widget_id(core: &Core, selector: &Value) -> Option<String> {
+pub fn resolve_widget_id(core: &Core, selector: &Value) -> Option<String> {
     match parse_selector(selector)? {
         Selector::Id(wid) => Some(wid),
         Selector::Text(text) => core
@@ -584,7 +579,7 @@ pub(crate) fn resolve_widget_id(core: &Core, selector: &Value) -> Option<String>
 }
 
 /// Build an InteractResponse without writing it anywhere.
-pub(crate) fn build_interact_response(
+pub fn build_interact_response(
     core: &Core,
     id: String,
     action: String,
@@ -706,7 +701,7 @@ pub(crate) fn build_interact_response(
 }
 
 /// Build and emit an InteractResponse to stdout.
-pub(crate) fn handle_interact(
+pub fn handle_interact(
     core: &Core,
     id: String,
     action: String,
@@ -719,18 +714,18 @@ pub(crate) fn handle_interact(
 }
 
 /// Reset core to a blank state and return the response.
-pub(crate) fn build_reset_response(core: &mut Core, id: String) -> ResetResponse {
+pub fn build_reset_response(core: &mut Core, id: String) -> ResetResponse {
     *core = Core::new();
     ResetResponse::ok(id)
 }
 
 /// Reset core and emit the response to stdout.
-pub(crate) fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
+pub fn handle_reset(core: &mut Core, id: String) -> io::Result<()> {
     emit_wire(&build_reset_response(core, id))
 }
 
 /// Build a TreeHashResponse without writing it anywhere.
-pub(crate) fn build_tree_hash_response(core: &Core, id: String, name: String) -> TreeHashResponse {
+pub fn build_tree_hash_response(core: &Core, id: String, name: String) -> TreeHashResponse {
     use sha2::{Digest, Sha256};
 
     let tree_json = match core.tree.root() {
@@ -746,7 +741,7 @@ pub(crate) fn build_tree_hash_response(core: &Core, id: String, name: String) ->
 }
 
 /// Build and emit a TreeHashResponse to stdout.
-pub(crate) fn handle_tree_hash(core: &Core, id: String, name: String) -> io::Result<()> {
+pub fn handle_tree_hash(core: &Core, id: String, name: String) -> io::Result<()> {
     emit_wire(&build_tree_hash_response(core, id, name))
 }
 

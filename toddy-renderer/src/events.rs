@@ -32,19 +32,19 @@ fn path_to_string(path: std::path::PathBuf) -> String {
 }
 
 impl App {
-    pub(crate) fn handle_key_pressed(&self, data: KeyEventData) -> Task<Message> {
+    pub fn handle_key_pressed(&self, data: KeyEventData) -> Task<Message> {
         self.emit_subscription(SUB_KEY_PRESS, data.captured, |tag| {
             OutgoingEvent::key_press(tag, &data)
         })
     }
 
-    pub(crate) fn handle_key_released(&self, data: KeyEventData) -> Task<Message> {
+    pub fn handle_key_released(&self, data: KeyEventData) -> Task<Message> {
         self.emit_subscription(SUB_KEY_RELEASE, data.captured, |tag| {
             OutgoingEvent::key_release(tag, &data)
         })
     }
 
-    pub(crate) fn handle_modifiers_changed(
+    pub fn handle_modifiers_changed(
         &mut self,
         mods: iced::keyboard::Modifiers,
         captured: bool,
@@ -54,25 +54,25 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_cursor_moved(&mut self, pos: Point, captured: bool) -> Task<Message> {
+    pub fn handle_cursor_moved(&mut self, pos: Point, captured: bool) -> Task<Message> {
         self.coalesce_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_moved(tag, pos.x, pos.y)
         })
     }
 
-    pub(crate) fn handle_cursor_entered(&self, captured: bool) -> Task<Message> {
+    pub fn handle_cursor_entered(&self, captured: bool) -> Task<Message> {
         self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_entered(tag)
         })
     }
 
-    pub(crate) fn handle_cursor_left(&self, captured: bool) -> Task<Message> {
+    pub fn handle_cursor_left(&self, captured: bool) -> Task<Message> {
         self.emit_subscription(SUB_MOUSE_MOVE, captured, |tag| {
             OutgoingEvent::cursor_left(tag)
         })
     }
 
-    pub(crate) fn handle_mouse_button_pressed(
+    pub fn handle_mouse_button_pressed(
         &self,
         button: iced::mouse::Button,
         captured: bool,
@@ -82,7 +82,7 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_mouse_button_released(
+    pub fn handle_mouse_button_released(
         &self,
         button: iced::mouse::Button,
         captured: bool,
@@ -92,7 +92,7 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_wheel_scrolled(
+    pub fn handle_wheel_scrolled(
         &mut self,
         delta: iced::mouse::ScrollDelta,
         captured: bool,
@@ -103,7 +103,7 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_finger_pressed(
+    pub fn handle_finger_pressed(
         &self,
         finger: iced::touch::Finger,
         pos: Point,
@@ -114,7 +114,7 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_finger_moved(
+    pub fn handle_finger_moved(
         &mut self,
         finger: iced::touch::Finger,
         pos: Point,
@@ -125,7 +125,7 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_finger_lifted(
+    pub fn handle_finger_lifted(
         &self,
         finger: iced::touch::Finger,
         pos: Point,
@@ -136,7 +136,7 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_finger_lost(
+    pub fn handle_finger_lost(
         &self,
         finger: iced::touch::Finger,
         pos: Point,
@@ -153,11 +153,11 @@ impl App {
     // macOS (built-in input methods), Linux/X11 (XIM/IBus), Linux/Wayland
     // (text-input-v3 protocol -- compositor support varies). The preedit
     // cursor range may be None on some older X11 IME implementations.
-    pub(crate) fn handle_ime_opened(&self, captured: bool) -> Task<Message> {
+    pub fn handle_ime_opened(&self, captured: bool) -> Task<Message> {
         self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_opened)
     }
 
-    pub(crate) fn handle_ime_preedit(
+    pub fn handle_ime_preedit(
         &self,
         text: String,
         cursor: Option<std::ops::Range<usize>>,
@@ -168,13 +168,13 @@ impl App {
         })
     }
 
-    pub(crate) fn handle_ime_commit(&self, text: String, captured: bool) -> Task<Message> {
+    pub fn handle_ime_commit(&self, text: String, captured: bool) -> Task<Message> {
         self.emit_subscription(SUB_IME, captured, |tag| {
             OutgoingEvent::ime_commit(tag, text)
         })
     }
 
-    pub(crate) fn handle_ime_closed(&self, captured: bool) -> Task<Message> {
+    pub fn handle_ime_closed(&self, captured: bool) -> Task<Message> {
         self.emit_subscription(SUB_IME, captured, OutgoingEvent::ime_closed)
     }
 
@@ -197,11 +197,7 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn handle_window_event(
-        &self,
-        iced_id: window::Id,
-        evt: window::Event,
-    ) -> Task<Message> {
+    pub fn handle_window_event(&self, iced_id: window::Id, evt: window::Event) -> Task<Message> {
         let toddy_id = self.windows.toddy_id_for(&iced_id);
         if toddy_id.is_empty() {
             log::warn!(

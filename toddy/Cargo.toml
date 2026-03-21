@@ -24,6 +24,7 @@ path = "src/main.rs"
 
 [dependencies]
 toddy-core = { version = "0.3.1", path = "../toddy-core" }
+toddy-renderer = { version = "0.3.1", path = "../toddy-renderer" }
 env_logger = "0.11"
 log = "0.4"
 iced = { version = "0.6", package = "toddy-iced", features = ["tokio", "advanced", "sysinfo", "a11y"] }

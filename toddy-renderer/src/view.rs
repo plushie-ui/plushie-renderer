@@ -11,7 +11,7 @@ use crate::App;
 impl App {
     /// Render a single window's UI tree into iced `Element`s.
     /// Called by the iced daemon for each open window on every frame.
-    pub(crate) fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
+    pub fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
         let toddy_id = match self.windows.get_toddy(&window_id) {
             Some(id) => id,
             None => {

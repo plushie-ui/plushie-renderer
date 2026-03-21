@@ -8,22 +8,22 @@
 //! traits and cfg-gated dependencies. The `toddy` binary crate and
 //! `toddy-web` WASM crate each provide their own implementations.
 
-mod app;
-mod apply;
+pub mod app;
+pub mod apply;
 pub mod constants;
-mod emitter;
+pub mod emitter;
 pub mod emitters;
-mod events;
+pub mod events;
 pub mod message_processing;
 pub mod scripting;
-mod subscriptions;
-mod update;
-mod view;
-mod widget_ops;
-mod window_map;
-mod window_ops;
+pub mod subscriptions;
+pub mod update;
+pub mod view;
+pub mod widget_ops;
+pub mod window_map;
+pub mod window_ops;
 
 pub mod effects;
 
-pub use app::App;
+pub use app::{App, validate_scale_factor};
 pub use effects::EffectHandler;
