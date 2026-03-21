@@ -176,8 +176,8 @@ pub enum Message {
         shape_id: String,
         x: f32,
         y: f32,
-        dx: f32,
-        dy: f32,
+        delta_x: f32,
+        delta_y: f32,
     },
     /// Canvas shape drag ended (release after drag).
     CanvasShapeDragEnd {

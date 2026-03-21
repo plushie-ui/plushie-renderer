@@ -222,7 +222,7 @@ pub(crate) fn make_key_released(key: Key, modifiers: Modifiers) -> Event {
 /// Convert a scripting protocol interaction into a sequence of iced events.
 ///
 /// Returns an empty vec for action types that don't map to iced events
-/// (synthetic-only actions like paste, sort, canvas_*, pane_focus_cycle).
+/// (synthetic-only actions like paste, sort, pane_focus_cycle, slide).
 pub(crate) fn interaction_to_iced_events(
     action: &str,
     _widget_id: Option<&str>,

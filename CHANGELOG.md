@@ -105,6 +105,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   silent overflow.
 - `tree_hash` returns sentinel on serialization failure instead of
   panicking.
+- Headless mode: canvas interact actions (`canvas_press`, `canvas_release`,
+  `canvas_move`) now inject real iced mouse events, producing shape-level
+  events (enter/leave/click/drag) just like windowed mode. Previously
+  they were synthetic-only and could not trigger canvas shape interaction.
 - Headless mode: break event injection loop on EOF mid-interact; use
   `cancelled` status for unavailable async effects; emit
   `theme_changed` subscription events.

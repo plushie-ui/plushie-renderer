@@ -759,9 +759,9 @@ interaction.
 | `slide` | synthetic only | Slide |
 | `paste` | synthetic only | Paste |
 | `sort` | synthetic only | Sort |
-| `canvas_press` | synthetic only | Canvas press |
-| `canvas_release` | synthetic only | Canvas release |
-| `canvas_move` | synthetic only | Canvas move |
+| `canvas_press` | CursorMoved, ButtonPressed | Canvas press (also triggers shape events) |
+| `canvas_release` | CursorMoved, ButtonReleased | Canvas release (also triggers shape events) |
+| `canvas_move` | CursorMoved | Canvas move (also triggers shape enter/leave) |
 | `pane_focus_cycle` | synthetic only | Pane focus cycle |
 
 Actions marked **synthetic only** have no iced event equivalent

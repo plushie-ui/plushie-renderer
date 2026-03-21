@@ -1498,8 +1498,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         shape_id: drag.shape_id.clone(),
                         x: effective.x,
                         y: effective.y,
-                        dx,
-                        dy,
+                        delta_x: dx,
+                        delta_y: dy,
                     };
                     action = Some(iced::widget::Action::publish(msg).and_capture());
                 }
