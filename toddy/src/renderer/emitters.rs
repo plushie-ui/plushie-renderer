@@ -327,6 +327,63 @@ pub(crate) fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             *delta_x,
             *delta_y,
         )),
+        Message::CanvasShapeEnter {
+            canvas_id,
+            shape_id,
+            x,
+            y,
+        } => Some(OutgoingEvent::canvas_shape_enter(
+            canvas_id.clone(),
+            shape_id.clone(),
+            *x,
+            *y,
+        )),
+        Message::CanvasShapeLeave {
+            canvas_id,
+            shape_id,
+        } => Some(OutgoingEvent::canvas_shape_leave(
+            canvas_id.clone(),
+            shape_id.clone(),
+        )),
+        Message::CanvasShapeClick {
+            canvas_id,
+            shape_id,
+            x,
+            y,
+            button,
+        } => Some(OutgoingEvent::canvas_shape_click(
+            canvas_id.clone(),
+            shape_id.clone(),
+            *x,
+            *y,
+            button.clone(),
+        )),
+        Message::CanvasShapeDrag {
+            canvas_id,
+            shape_id,
+            x,
+            y,
+            dx,
+            dy,
+        } => Some(OutgoingEvent::canvas_shape_drag(
+            canvas_id.clone(),
+            shape_id.clone(),
+            *x,
+            *y,
+            *dx,
+            *dy,
+        )),
+        Message::CanvasShapeDragEnd {
+            canvas_id,
+            shape_id,
+            x,
+            y,
+        } => Some(OutgoingEvent::canvas_shape_drag_end(
+            canvas_id.clone(),
+            shape_id.clone(),
+            *x,
+            *y,
+        )),
         _ => None,
     }
 }

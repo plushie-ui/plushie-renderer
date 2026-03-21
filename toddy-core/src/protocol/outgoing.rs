@@ -587,6 +587,78 @@ impl OutgoingEvent {
     }
 
     // -----------------------------------------------------------------------
+    // Canvas shape events (interactive shapes)
+    // -----------------------------------------------------------------------
+
+    pub fn canvas_shape_enter(canvas_id: String, shape_id: String, x: f32, y: f32) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "shape_id": shape_id,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
+            })),
+            ..Self::bare("canvas_shape_enter", canvas_id)
+        }
+    }
+
+    pub fn canvas_shape_leave(canvas_id: String, shape_id: String) -> Self {
+        Self {
+            data: Some(serde_json::json!({"shape_id": shape_id})),
+            ..Self::bare("canvas_shape_leave", canvas_id)
+        }
+    }
+
+    pub fn canvas_shape_click(
+        canvas_id: String,
+        shape_id: String,
+        x: f32,
+        y: f32,
+        button: String,
+    ) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "shape_id": shape_id,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
+                "button": button,
+            })),
+            ..Self::bare("canvas_shape_click", canvas_id)
+        }
+    }
+
+    pub fn canvas_shape_drag(
+        canvas_id: String,
+        shape_id: String,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "shape_id": shape_id,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
+                "dx": sanitize_f32(dx),
+                "dy": sanitize_f32(dy),
+            })),
+            coalesce: Some(CoalesceHint::Replace),
+            ..Self::bare("canvas_shape_drag", canvas_id)
+        }
+    }
+
+    pub fn canvas_shape_drag_end(canvas_id: String, shape_id: String, x: f32, y: f32) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "shape_id": shape_id,
+                "x": sanitize_f32(x),
+                "y": sanitize_f32(y),
+            })),
+            ..Self::bare("canvas_shape_drag_end", canvas_id)
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // MouseArea events
     // -----------------------------------------------------------------------
 

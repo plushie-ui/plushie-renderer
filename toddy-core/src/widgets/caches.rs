@@ -94,6 +94,9 @@ define_caches! {
     /// Per-canvas, per-layer geometry caches. Inner key is layer name,
     /// u64 is content hash for invalidation.
     canvas_caches: HashMap<String, (u64, iced_canvas::Cache)>,
+    /// Per-canvas interactive shape data parsed from shape JSON. Used for
+    /// hit testing in `Program::update()` without re-parsing every frame.
+    canvas_interactions: Vec<super::canvas::InteractiveShape>,
     /// Per-qr_code caches (content hash, canvas Cache).
     qr_code_caches: (u64, iced_canvas::Cache),
     /// Resolved themes for Themer widget nodes.

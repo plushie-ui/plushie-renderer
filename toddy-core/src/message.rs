@@ -153,6 +153,39 @@ pub enum Message {
         delta_x: f32,
         delta_y: f32,
     },
+    /// Canvas shape entered (cursor entered interactive shape bounds).
+    CanvasShapeEnter {
+        canvas_id: String,
+        shape_id: String,
+        x: f32,
+        y: f32,
+    },
+    /// Canvas shape left (cursor exited interactive shape bounds).
+    CanvasShapeLeave { canvas_id: String, shape_id: String },
+    /// Canvas shape clicked (press + release on same shape).
+    CanvasShapeClick {
+        canvas_id: String,
+        shape_id: String,
+        x: f32,
+        y: f32,
+        button: String,
+    },
+    /// Canvas shape drag (continuous drag on draggable shape).
+    CanvasShapeDrag {
+        canvas_id: String,
+        shape_id: String,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
+    /// Canvas shape drag ended (release after drag).
+    CanvasShapeDragEnd {
+        canvas_id: String,
+        shape_id: String,
+        x: f32,
+        y: f32,
+    },
     /// PaneGrid pane was resized (grid_id, resize_event).
     PaneResized(String, iced::widget::pane_grid::ResizeEvent),
     /// PaneGrid pane was dragged (grid_id, drag_event).

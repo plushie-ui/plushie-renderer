@@ -16,8 +16,10 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
-use iced::widget::canvas;
-use iced::{Color, Element, Length, Pixels, Point, Radians, Size, Vector, alignment, mouse};
+use iced::widget::canvas::{self, AccessibleShape};
+use iced::{
+    Color, Element, Length, Pixels, Point, Radians, Rectangle, Size, Vector, alignment, mouse,
+};
 use serde_json::Value;
 
 use super::caches::{WidgetCaches, canvas_layer_map, hash_json_value};
@@ -30,6 +32,297 @@ use crate::protocol::TreeNode;
 /// are truncated with a warning to prevent excessive tessellation work from
 /// a single oversized payload.
 const MAX_SHAPES_PER_LAYER: usize = 10_000;
+
+// ---------------------------------------------------------------------------
+// Interactive shapes -- hit testing and interaction state
+// ---------------------------------------------------------------------------
+
+/// Geometric region for hit testing an interactive shape.
+#[derive(Debug, Clone)]
+pub(crate) enum HitRegion {
+    Rect {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    },
+    Circle {
+        cx: f32,
+        cy: f32,
+        r: f32,
+    },
+    Line {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        half_width: f32,
+    },
+}
+
+/// Axis constraint for draggable shapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DragAxis {
+    Both,
+    X,
+    Y,
+}
+
+/// Bounds constraint for draggable shapes. Fields are populated during
+/// shape parsing and read during drag event handling for clamping.
+#[derive(Debug, Clone)]
+pub(crate) struct DragBounds {
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_y: f32,
+    pub max_y: f32,
+}
+
+/// Parsed interactive configuration for a canvas shape.
+///
+/// Extracted from the `"interactive"` field on shape JSON during
+/// `ensure_caches`. Stored in `WidgetCaches` so `update()` can hit-test
+/// without re-parsing JSON every frame.
+#[derive(Debug, Clone)]
+pub(crate) struct InteractiveShape {
+    /// Unique ID for this shape (from `interactive.id`).
+    pub id: String,
+    /// Which layer this shape belongs to.
+    pub layer: String,
+    /// Geometric bounds for hit testing.
+    pub hit_region: HitRegion,
+    pub on_click: bool,
+    pub on_hover: bool,
+    pub draggable: bool,
+    pub drag_axis: DragAxis,
+    pub drag_bounds: Option<DragBounds>,
+    /// Cursor to show when hovering (e.g. "pointer", "grab").
+    pub cursor: Option<String>,
+    /// Whether this shape has hover/pressed style overrides.
+    pub has_hover_style: bool,
+    pub has_pressed_style: bool,
+    /// Tooltip text to show on hover.
+    pub tooltip: Option<String>,
+    /// Raw a11y JSON for accessible node creation in
+    /// [`accessible_shapes()`](CanvasProgram::accessible_shapes).
+    pub a11y: Option<Value>,
+}
+
+/// Active drag state tracked in `CanvasState`.
+#[derive(Debug, Clone)]
+struct DragState {
+    shape_id: String,
+    last: Point,
+}
+
+/// Test whether a point is inside a hit region.
+fn hit_test(point: Point, region: &HitRegion) -> bool {
+    match *region {
+        HitRegion::Rect { x, y, w, h } => {
+            point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h
+        }
+        HitRegion::Circle { cx, cy, r } => {
+            let dx = point.x - cx;
+            let dy = point.y - cy;
+            dx * dx + dy * dy <= r * r
+        }
+        HitRegion::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            half_width,
+        } => {
+            // Distance from point to line segment.
+            let dx = x2 - x1;
+            let dy = y2 - y1;
+            let len_sq = dx * dx + dy * dy;
+            if len_sq < f32::EPSILON {
+                // Degenerate line (zero length) -- treat as point.
+                let d = ((point.x - x1).powi(2) + (point.y - y1).powi(2)).sqrt();
+                return d <= half_width;
+            }
+            // Project point onto line, clamped to segment.
+            let t = ((point.x - x1) * dx + (point.y - y1) * dy) / len_sq;
+            let t = t.clamp(0.0, 1.0);
+            let proj_x = x1 + t * dx;
+            let proj_y = y1 + t * dy;
+            let dist_sq = (point.x - proj_x).powi(2) + (point.y - proj_y).powi(2);
+            dist_sq <= half_width * half_width
+        }
+    }
+}
+
+/// Find the topmost interactive shape under the given point.
+///
+/// Shapes are tested in reverse order (last in list = topmost drawn = tested first).
+fn find_hit_shape(point: Point, shapes: &[InteractiveShape]) -> Option<&InteractiveShape> {
+    shapes
+        .iter()
+        .rev()
+        .find(|s| (s.on_click || s.on_hover || s.draggable) && hit_test(point, &s.hit_region))
+}
+
+/// Parse an `InteractiveShape` from a shape's JSON `"interactive"` field.
+///
+/// Returns `None` if the interactive field is missing or has no `id`.
+fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<InteractiveShape> {
+    let interactive = shape.get("interactive")?.as_object()?;
+    let id = interactive.get("id")?.as_str()?.to_string();
+    if id.is_empty() {
+        return None;
+    }
+
+    let hit_region = compute_hit_region(shape, interactive)?;
+
+    let drag_axis = match interactive
+        .get("drag_axis")
+        .and_then(|v| v.as_str())
+        .unwrap_or("both")
+    {
+        "x" => DragAxis::X,
+        "y" => DragAxis::Y,
+        _ => DragAxis::Both,
+    };
+
+    let drag_bounds = interactive.get("drag_bounds").and_then(|v| {
+        let obj = v.as_object()?;
+        Some(DragBounds {
+            min_x: obj.get("min_x")?.as_f64()? as f32,
+            max_x: obj.get("max_x")?.as_f64()? as f32,
+            min_y: obj.get("min_y")?.as_f64()? as f32,
+            max_y: obj.get("max_y")?.as_f64()? as f32,
+        })
+    });
+
+    let cursor = interactive
+        .get("cursor")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Some(InteractiveShape {
+        id,
+        layer: layer_name.to_string(),
+        hit_region,
+        on_click: interactive
+            .get("on_click")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        on_hover: interactive
+            .get("on_hover")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        draggable: interactive
+            .get("draggable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        drag_axis,
+        drag_bounds,
+        cursor,
+        has_hover_style: interactive.get("hover_style").is_some(),
+        has_pressed_style: interactive.get("pressed_style").is_some(),
+        tooltip: interactive
+            .get("tooltip")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        a11y: interactive.get("a11y").cloned(),
+    })
+}
+
+/// Compute the hit region from a shape's geometry.
+fn compute_hit_region(
+    shape: &Value,
+    interactive: &serde_json::Map<String, Value>,
+) -> Option<HitRegion> {
+    // Explicit hit_rect overrides geometric inference.
+    if let Some(hr) = interactive.get("hit_rect").and_then(|v| v.as_object()) {
+        let x = hr.get("x")?.as_f64()? as f32;
+        let y = hr.get("y")?.as_f64()? as f32;
+        let w = hr.get("w").or(hr.get("width"))?.as_f64()? as f32;
+        let h = hr.get("h").or(hr.get("height"))?.as_f64()? as f32;
+        return Some(HitRegion::Rect { x, y, w, h });
+    }
+
+    let shape_type = shape.get("type").and_then(|v| v.as_str())?;
+    match shape_type {
+        "rect" => {
+            let x = json_f32(shape, "x");
+            let y = json_f32(shape, "y");
+            let w = json_f32(shape, "w");
+            let h = json_f32(shape, "h");
+            Some(HitRegion::Rect { x, y, w, h })
+        }
+        "circle" => {
+            let cx = json_f32(shape, "x");
+            let cy = json_f32(shape, "y");
+            let r = json_f32(shape, "r");
+            Some(HitRegion::Circle { cx, cy, r })
+        }
+        "line" => {
+            let x1 = json_f32(shape, "x1");
+            let y1 = json_f32(shape, "y1");
+            let x2 = json_f32(shape, "x2");
+            let y2 = json_f32(shape, "y2");
+            let stroke_width = shape
+                .get("stroke")
+                .and_then(|s| s.get("width"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0) as f32;
+            // Legacy: "width" at top level if no stroke object
+            let stroke_width = if stroke_width <= 1.0 {
+                shape
+                    .get("width")
+                    .and_then(|v| v.as_f64())
+                    .map(|v| v as f32)
+                    .unwrap_or(stroke_width)
+            } else {
+                stroke_width
+            };
+            let half_width = (stroke_width / 2.0).max(2.0); // min 2px for usability
+            Some(HitRegion::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                half_width,
+            })
+        }
+        // For unsupported shape types, the host can provide an explicit
+        // hit_rect in the interactive field as a fallback.
+        _ => {
+            log::debug!(
+                "canvas: no geometric hit region for shape type '{shape_type}', \
+                 use interactive.hit_rect for hit testing"
+            );
+            None
+        }
+    }
+}
+
+/// Parse a cursor name string into an iced mouse interaction.
+fn parse_cursor_interaction(cursor: &str) -> mouse::Interaction {
+    match cursor {
+        "pointer" => mouse::Interaction::Pointer,
+        "grab" => mouse::Interaction::Grab,
+        "grabbing" => mouse::Interaction::Grabbing,
+        "crosshair" => mouse::Interaction::Crosshair,
+        "move" => mouse::Interaction::Move,
+        "text" => mouse::Interaction::Text,
+        "not_allowed" | "not-allowed" => mouse::Interaction::NotAllowed,
+        "no_drop" | "no-drop" => mouse::Interaction::NoDrop,
+        "help" => mouse::Interaction::Help,
+        "progress" => mouse::Interaction::Progress,
+        "wait" => mouse::Interaction::Wait,
+        "cell" => mouse::Interaction::Cell,
+        "copy" => mouse::Interaction::Copy,
+        "alias" => mouse::Interaction::Alias,
+        "zoom_in" | "zoom-in" => mouse::Interaction::ZoomIn,
+        "zoom_out" | "zoom-out" => mouse::Interaction::ZoomOut,
+        "col_resize" | "col-resize" => mouse::Interaction::ResizingColumn,
+        "row_resize" | "row-resize" => mouse::Interaction::ResizingRow,
+        _ => mouse::Interaction::Pointer, // default for interactive shapes
+    }
+}
 
 /// Extract sorted layer data directly from canvas props as cloned `Value`s.
 ///
@@ -80,6 +373,12 @@ fn canvas_layers_from_props(
 #[derive(Default)]
 struct CanvasState {
     cursor_position: Option<Point>,
+    /// ID of the interactive shape currently under the cursor.
+    hovered_shape: Option<String>,
+    /// ID of the shape being pressed (mouse down, not yet released).
+    pressed_shape: Option<String>,
+    /// Active drag state (shape being dragged).
+    dragging: Option<DragState>,
 }
 
 struct CanvasProgram<'a> {
@@ -95,12 +394,189 @@ struct CanvasProgram<'a> {
     on_scroll: bool,
     /// Reference to the image registry for resolving in-memory image handles.
     images: &'a crate::image_registry::ImageRegistry,
+    /// Interactive shapes parsed during ensure_caches.
+    interactive_shapes: &'a [InteractiveShape],
 }
 
 impl CanvasProgram<'_> {
     fn is_interactive(&self) -> bool {
-        self.on_press || self.on_release || self.on_move || self.on_scroll
+        self.on_press
+            || self.on_release
+            || self.on_move
+            || self.on_scroll
+            || !self.interactive_shapes.is_empty()
     }
+
+    /// Find the layer name that currently has an active hover or pressed
+    /// shape with style overrides. Returns `None` if no interaction is
+    /// active or the active shape has no style overrides.
+    fn layer_with_active_interaction(&self, state: &CanvasState) -> Option<String> {
+        let active_id = state
+            .hovered_shape
+            .as_deref()
+            .or(state.pressed_shape.as_deref());
+        let active_id = active_id?;
+        let shape = self.interactive_shapes.iter().find(|s| s.id == active_id)?;
+        if shape.has_hover_style || shape.has_pressed_style {
+            Some(shape.layer.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Get the tooltip text for the currently hovered shape, if any.
+    fn active_tooltip(&self, state: &CanvasState) -> Option<String> {
+        let hovered_id = state.hovered_shape.as_deref()?;
+        let shape = self
+            .interactive_shapes
+            .iter()
+            .find(|s| s.id == hovered_id)?;
+        shape.tooltip.clone()
+    }
+
+    /// Draw shapes with hover/pressed style overrides applied to the
+    /// active shape. Used when a layer needs fresh drawing due to
+    /// interaction state changes.
+    fn draw_shapes_with_overrides(
+        &self,
+        frame: &mut canvas::Frame,
+        shapes: &[&Value],
+        state: &CanvasState,
+        images: &crate::image_registry::ImageRegistry,
+    ) {
+        let hovered = state.hovered_shape.as_deref();
+        let pressed = state.pressed_shape.as_deref();
+        let mut i = 0;
+        while i < shapes.len() {
+            let shape = shapes[i];
+            let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match shape_type {
+                "push_clip" => {
+                    let x = shape.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let y = shape.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let w = shape.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let h = shape.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let (end_offset, clipped) = collect_clipped_shapes(&shapes[i + 1..]);
+                    let clip_rect = iced::Rectangle {
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    };
+                    frame.with_clip(clip_rect, |f| {
+                        // For clipped regions, fall back to normal drawing.
+                        // Overrides on clipped shapes are a rare edge case.
+                        draw_canvas_shapes(f, &clipped, images);
+                    });
+                    i = i + 1 + end_offset + 1;
+                }
+                "pop_clip" => {
+                    i += 1;
+                }
+                _ => {
+                    let shape_id = shape
+                        .get("interactive")
+                        .and_then(|v| v.get("id"))
+                        .and_then(|v| v.as_str());
+
+                    let needs_override =
+                        shape_id.is_some_and(|sid| pressed == Some(sid) || hovered == Some(sid));
+
+                    if needs_override {
+                        let sid = shape_id.unwrap();
+                        let interactive = shape.get("interactive").unwrap();
+                        // Pressed style takes priority over hover style.
+                        let override_style = if pressed == Some(sid) {
+                            interactive.get("pressed_style")
+                        } else {
+                            None
+                        }
+                        .or_else(|| interactive.get("hover_style"));
+
+                        if let Some(overrides) = override_style {
+                            let merged = merge_shape_style(shape, overrides);
+                            draw_canvas_shape(frame, &merged, images);
+                        } else {
+                            draw_canvas_shape(frame, shape, images);
+                        }
+                    } else {
+                        draw_canvas_shape(frame, shape, images);
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Merge style overrides into a shape's JSON. The override object can
+/// contain `fill`, `stroke`, `stroke_width`, `opacity` -- these replace
+/// the corresponding fields on the shape.
+fn merge_shape_style(shape: &Value, overrides: &Value) -> Value {
+    let mut merged = shape.clone();
+    if let (Some(merged_obj), Some(override_obj)) = (merged.as_object_mut(), overrides.as_object())
+    {
+        for (key, val) in override_obj {
+            merged_obj.insert(key.clone(), val.clone());
+        }
+    }
+    merged
+}
+
+/// Draw a tooltip overlay at the cursor position.
+fn draw_tooltip(frame: &mut canvas::Frame, text: &str, cursor: Point, bounds: Size) {
+    use iced::widget::canvas::Text;
+
+    let padding = 6.0;
+    let font_size = 13.0;
+    // Estimate text width (rough: 0.6 * font_size per char).
+    let est_width = text.chars().count() as f32 * font_size * 0.6 + padding * 2.0;
+    let est_height = font_size + padding * 2.0;
+
+    // Position tooltip near cursor, clamped to canvas bounds.
+    let mut x = cursor.x + 12.0;
+    let mut y = cursor.y - est_height - 4.0;
+    if x + est_width > bounds.width {
+        x = (cursor.x - est_width - 4.0).max(0.0);
+    }
+    if y < 0.0 {
+        y = cursor.y + 20.0;
+    }
+
+    // Background
+    let bg_rect = iced::Rectangle {
+        x,
+        y,
+        width: est_width,
+        height: est_height,
+    };
+    frame.fill_rectangle(
+        Point::new(bg_rect.x, bg_rect.y),
+        Size::new(bg_rect.width, bg_rect.height),
+        Color::from_rgba(0.15, 0.15, 0.15, 0.92),
+    );
+
+    // Text
+    frame.fill_text(Text {
+        content: text.to_string(),
+        position: Point::new(x + padding, y + padding),
+        color: Color::from_rgb(0.95, 0.95, 0.95),
+        size: Pixels(font_size),
+        ..Text::default()
+    });
+}
+
+/// Pick the most important `Action` when multiple events fire in one
+/// `update()` call. iced's `Action` can only carry one message, so
+/// when shape events (enter/leave/click) and raw canvas events
+/// (move/press/release) fire simultaneously, we keep the shape event.
+/// Raw canvas events use Replace coalescing, so the next frame
+/// delivers the latest position anyway.
+fn pick_action(
+    existing: Option<iced::widget::Action<Message>>,
+    new: iced::widget::Action<Message>,
+) -> iced::widget::Action<Message> {
+    existing.unwrap_or(new)
 }
 
 /// Parse a `fill_rule` string into a `canvas::fill::Rule`. Defaults to `NonZero`.
@@ -721,39 +1197,210 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         bounds: iced::Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<iced::widget::Action<Message>> {
-        let position = cursor.position_in(bounds)?;
-        state.cursor_position = Some(position);
+        let position = match cursor.position_in(bounds) {
+            Some(pos) => {
+                state.cursor_position = Some(pos);
+                pos
+            }
+            None => {
+                // Cursor is outside canvas bounds. Clean up interaction
+                // state so we don't have stale hover/drag.
+                let mut action: Option<iced::widget::Action<Message>> = None;
+                if let Some(hovered_id) = state.hovered_shape.take() {
+                    let msg = Message::CanvasShapeLeave {
+                        canvas_id: self.id.clone(),
+                        shape_id: hovered_id,
+                    };
+                    action = Some(iced::widget::Action::publish(msg));
+                }
+                if let Some(drag) = state.dragging.take() {
+                    // End drag with last known position.
+                    let pos = state.cursor_position.unwrap_or(Point::ORIGIN);
+                    let msg = Message::CanvasShapeDragEnd {
+                        canvas_id: self.id.clone(),
+                        shape_id: drag.shape_id,
+                        x: pos.x,
+                        y: pos.y,
+                    };
+                    action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                }
+                state.pressed_shape = None;
+                state.cursor_position = None;
+                return action;
+            }
+        };
 
         match event {
-            iced::Event::Mouse(mouse::Event::ButtonPressed(button)) if self.on_press => {
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                let mut action: Option<iced::widget::Action<Message>> = None;
+
+                // -- Drag tracking --
+                if let Some(ref mut drag) = state.dragging {
+                    let shape = self
+                        .interactive_shapes
+                        .iter()
+                        .find(|s| s.id == drag.shape_id);
+                    let (mut dx, mut dy) = (position.x - drag.last.x, position.y - drag.last.y);
+                    // Axis constraints
+                    if let Some(shape) = shape {
+                        match shape.drag_axis {
+                            DragAxis::X => dy = 0.0,
+                            DragAxis::Y => dx = 0.0,
+                            DragAxis::Both => {}
+                        }
+                        // Bounds clamping: clamp the reported position
+                        // to the declared bounds, then recompute deltas.
+                        if let Some(ref db) = shape.drag_bounds {
+                            let clamped_x = position.x.clamp(db.min_x, db.max_x);
+                            let clamped_y = position.y.clamp(db.min_y, db.max_y);
+                            dx = clamped_x - drag.last.x;
+                            dy = clamped_y - drag.last.y;
+                        }
+                    }
+                    drag.last = position;
+                    let msg = Message::CanvasShapeDrag {
+                        canvas_id: self.id.clone(),
+                        shape_id: drag.shape_id.clone(),
+                        x: position.x,
+                        y: position.y,
+                        dx,
+                        dy,
+                    };
+                    action = Some(iced::widget::Action::publish(msg).and_capture());
+                }
+
+                // -- Hover tracking (skip during active drag) --
+                if state.dragging.is_none() {
+                    let hit = find_hit_shape(position, self.interactive_shapes);
+                    let new_hovered = hit.map(|s| s.id.clone());
+                    let old_hovered = state.hovered_shape.take();
+
+                    if new_hovered != old_hovered {
+                        // Shape leave
+                        if let Some(ref old_id) = old_hovered {
+                            let msg = Message::CanvasShapeLeave {
+                                canvas_id: self.id.clone(),
+                                shape_id: old_id.clone(),
+                            };
+                            action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                        }
+                        // Shape enter
+                        if let Some(ref new_id) = new_hovered {
+                            let msg = Message::CanvasShapeEnter {
+                                canvas_id: self.id.clone(),
+                                shape_id: new_id.clone(),
+                                x: position.x,
+                                y: position.y,
+                            };
+                            action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                        }
+                    }
+                    state.hovered_shape = new_hovered;
+                }
+
+                // -- Raw canvas move event --
+                if self.on_move {
+                    let msg = Message::CanvasEvent {
+                        id: self.id.clone(),
+                        kind: "move".to_string(),
+                        x: position.x,
+                        y: position.y,
+                        extra: String::new(),
+                    };
+                    action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                }
+
+                action
+            }
+
+            iced::Event::Mouse(mouse::Event::ButtonPressed(button)) => {
                 let btn_str = serialize_mouse_button_for_canvas(button);
-                Some(iced::widget::Action::publish(Message::CanvasEvent {
-                    id: self.id.clone(),
-                    kind: "press".to_string(),
-                    x: position.x,
-                    y: position.y,
-                    extra: btn_str,
-                }))
+                let mut action: Option<iced::widget::Action<Message>> = None;
+
+                // -- Shape press: start drag or track pressed --
+                // Drag and click are mutually exclusive: if a shape is
+                // draggable, we start a drag (click never fires for it).
+                // If it's only clickable, we track pressed state for
+                // click detection on release.
+                if matches!(button, mouse::Button::Left)
+                    && let Some(shape) = find_hit_shape(position, self.interactive_shapes)
+                {
+                    if shape.draggable {
+                        state.dragging = Some(DragState {
+                            shape_id: shape.id.clone(),
+                            last: position,
+                        });
+                    } else if shape.on_click {
+                        state.pressed_shape = Some(shape.id.clone());
+                    }
+                }
+
+                // -- Raw canvas press event --
+                if self.on_press {
+                    let msg = Message::CanvasEvent {
+                        id: self.id.clone(),
+                        kind: "press".to_string(),
+                        x: position.x,
+                        y: position.y,
+                        extra: btn_str,
+                    };
+                    action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                }
+
+                action
             }
-            iced::Event::Mouse(mouse::Event::ButtonReleased(button)) if self.on_release => {
+
+            iced::Event::Mouse(mouse::Event::ButtonReleased(button)) => {
                 let btn_str = serialize_mouse_button_for_canvas(button);
-                Some(iced::widget::Action::publish(Message::CanvasEvent {
-                    id: self.id.clone(),
-                    kind: "release".to_string(),
-                    x: position.x,
-                    y: position.y,
-                    extra: btn_str,
-                }))
+                let mut action: Option<iced::widget::Action<Message>> = None;
+
+                if matches!(button, mouse::Button::Left) {
+                    // -- Drag end --
+                    if let Some(drag) = state.dragging.take() {
+                        let msg = Message::CanvasShapeDragEnd {
+                            canvas_id: self.id.clone(),
+                            shape_id: drag.shape_id,
+                            x: position.x,
+                            y: position.y,
+                        };
+                        action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                    }
+
+                    // -- Click detection: pressed shape == current hover --
+                    if let Some(pressed_id) = state.pressed_shape.take() {
+                        let still_over = state
+                            .hovered_shape
+                            .as_ref()
+                            .map(|h| h == &pressed_id)
+                            .unwrap_or(false);
+                        if still_over {
+                            let msg = Message::CanvasShapeClick {
+                                canvas_id: self.id.clone(),
+                                shape_id: pressed_id,
+                                x: position.x,
+                                y: position.y,
+                                button: btn_str.clone(),
+                            };
+                            action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                        }
+                    }
+                }
+
+                // -- Raw canvas release event --
+                if self.on_release {
+                    let msg = Message::CanvasEvent {
+                        id: self.id.clone(),
+                        kind: "release".to_string(),
+                        x: position.x,
+                        y: position.y,
+                        extra: btn_str,
+                    };
+                    action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                }
+
+                action
             }
-            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) if self.on_move => {
-                Some(iced::widget::Action::publish(Message::CanvasEvent {
-                    id: self.id.clone(),
-                    kind: "move".to_string(),
-                    x: position.x,
-                    y: position.y,
-                    extra: String::new(),
-                }))
-            }
+
             iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) if self.on_scroll => {
                 let (dx, dy) = match delta {
                     mouse::ScrollDelta::Lines { x, y } => (*x, *y),
@@ -767,13 +1414,14 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     delta_y: dy,
                 }))
             }
+
             _ => None,
         }
     }
 
     fn draw(
         &self,
-        _state: &CanvasState,
+        state: &CanvasState,
         renderer: &iced::Renderer,
         _theme: &iced::Theme,
         bounds: iced::Rectangle,
@@ -788,22 +1436,45 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             geometries.push(frame.into_geometry());
         }
 
+        // Determine which layers need fresh drawing due to active interaction.
+        let active_layer = self.layer_with_active_interaction(state);
+
         // Draw each layer, using its cache when available.
         let images = self.images;
         for (layer_name, shapes) in &self.layers {
             let shape_refs: Vec<&Value> = shapes.iter().collect();
-            let geom = if let Some((_hash, cache)) = self.caches.and_then(|c| c.get(layer_name)) {
-                cache.draw(renderer, bounds.size(), |frame| {
-                    draw_canvas_shapes(frame, &shape_refs, images);
-                })
+            let force_redraw = active_layer.as_deref() == Some(layer_name.as_str());
+
+            let geom = if !force_redraw {
+                if let Some((_hash, cache)) = self.caches.and_then(|c| c.get(layer_name)) {
+                    cache.draw(renderer, bounds.size(), |frame| {
+                        draw_canvas_shapes(frame, &shape_refs, images);
+                    })
+                } else {
+                    let mut frame = canvas::Frame::new(renderer, bounds.size());
+                    draw_canvas_shapes(&mut frame, &shape_refs, images);
+                    frame.into_geometry()
+                }
             } else {
-                // No cache available (shouldn't happen after ensure_caches, but
-                // handle gracefully by drawing uncached).
+                // Layer has active hover/pressed interaction -- clear cache
+                // and draw fresh with style overrides applied.
+                if let Some((_hash, cache)) = self.caches.and_then(|c| c.get(layer_name)) {
+                    cache.clear();
+                }
                 let mut frame = canvas::Frame::new(renderer, bounds.size());
-                draw_canvas_shapes(&mut frame, &shape_refs, images);
+                self.draw_shapes_with_overrides(&mut frame, &shape_refs, state, images);
                 frame.into_geometry()
             };
             geometries.push(geom);
+        }
+
+        // Tooltip overlay (uncached, drawn on top of all layers).
+        if let Some(ref tooltip) = self.active_tooltip(state)
+            && let Some(pos) = state.cursor_position
+        {
+            let mut frame = canvas::Frame::new(renderer, bounds.size());
+            draw_tooltip(&mut frame, tooltip, pos, bounds.size());
+            geometries.push(frame.into_geometry());
         }
 
         geometries
@@ -811,15 +1482,114 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
     fn mouse_interaction(
         &self,
-        _state: &CanvasState,
+        state: &CanvasState,
         _bounds: iced::Rectangle,
         _cursor: mouse::Cursor,
     ) -> mouse::Interaction {
+        // Dragging overrides everything.
+        if state.dragging.is_some() {
+            return mouse::Interaction::Grabbing;
+        }
+        // Per-shape cursor.
+        if let Some(ref hovered_id) = state.hovered_shape
+            && let Some(shape) = self.interactive_shapes.iter().find(|s| &s.id == hovered_id)
+        {
+            if let Some(ref cursor_name) = shape.cursor {
+                return parse_cursor_interaction(cursor_name);
+            }
+            // Default cursor for interactive shapes without explicit cursor.
+            return mouse::Interaction::Pointer;
+        }
+        // Fallback to canvas-level cursor.
         if self.is_interactive() {
             mouse::Interaction::Crosshair
         } else {
             mouse::Interaction::default()
         }
+    }
+
+    fn accessible_shapes(
+        &self,
+        _state: &CanvasState,
+        _canvas_bounds: iced::Rectangle,
+    ) -> Vec<AccessibleShape> {
+        self.interactive_shapes
+            .iter()
+            .filter_map(|shape| {
+                let a11y = shape.a11y.as_ref()?.as_object()?;
+                let role = a11y
+                    .get("role")
+                    .and_then(|v| v.as_str())
+                    .map(parse_a11y_role)
+                    .unwrap_or(iced::advanced::widget::operation::accessible::Role::Group);
+                let label = a11y
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let description = a11y
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let bounds = hit_region_to_rect(&shape.hit_region);
+                Some(AccessibleShape {
+                    bounds,
+                    role,
+                    label,
+                    description,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Convert a HitRegion to a bounding Rectangle for accessibility.
+fn hit_region_to_rect(region: &HitRegion) -> Rectangle {
+    match *region {
+        HitRegion::Rect { x, y, w, h } => Rectangle {
+            x,
+            y,
+            width: w,
+            height: h,
+        },
+        HitRegion::Circle { cx, cy, r } => Rectangle {
+            x: cx - r,
+            y: cy - r,
+            width: r * 2.0,
+            height: r * 2.0,
+        },
+        HitRegion::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            half_width,
+        } => {
+            let min_x = x1.min(x2) - half_width;
+            let min_y = y1.min(y2) - half_width;
+            let max_x = x1.max(x2) + half_width;
+            let max_y = y1.max(y2) + half_width;
+            Rectangle {
+                x: min_x,
+                y: min_y,
+                width: max_x - min_x,
+                height: max_y - min_y,
+            }
+        }
+    }
+}
+
+/// Parse an a11y role string into an accessible Role.
+fn parse_a11y_role(role: &str) -> iced::advanced::widget::operation::accessible::Role {
+    use iced::advanced::widget::operation::accessible::Role;
+    match role {
+        "button" => Role::Button,
+        "link" => Role::Link,
+        "slider" => Role::Slider,
+        "img" | "image" => Role::Image,
+        "listitem" | "list_item" => Role::ListItem,
+        "tab" => Role::Tab,
+        "treeitem" | "tree_item" => Role::TreeItem,
+        _ => Role::Group,
     }
 }
 
@@ -857,16 +1627,25 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     // "interactive" is a convenience flag that enables all event handlers.
     let interactive = prop_bool_default(props, "interactive", false);
 
+    let interactive_shapes = ctx
+        .caches
+        .canvas_interactions
+        .get(&node.id)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let has_interactive_shapes = !interactive_shapes.is_empty();
+
     let mut c = iced::widget::canvas(CanvasProgram {
         layers,
         caches: node_caches,
         background,
         id: node.id.clone(),
-        on_press: on_press || interactive,
-        on_release: on_release || interactive,
-        on_move: on_move || interactive,
+        on_press: on_press || interactive || has_interactive_shapes,
+        on_release: on_release || interactive || has_interactive_shapes,
+        on_move: on_move || interactive || has_interactive_shapes,
         on_scroll: on_scroll || interactive,
         images: ctx.images,
+        interactive_shapes,
     })
     .width(width)
     .height(height);
@@ -904,6 +1683,21 @@ pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut
     // Build layer map: either from "layers" (object) or "shapes" (array -> single layer).
     let layer_map = canvas_layer_map(props);
     let node_caches = caches.canvas_caches.entry(node.id.clone()).or_default();
+
+    // Parse interactive shapes from all layers.
+    let mut interactive_shapes = Vec::new();
+    for (layer_name, shapes_val) in &layer_map {
+        if let Some(shapes_arr) = shapes_val.as_array() {
+            for shape in shapes_arr {
+                if let Some(ishape) = parse_interactive_shape(shape, layer_name) {
+                    interactive_shapes.push(ishape);
+                }
+            }
+        }
+    }
+    caches
+        .canvas_interactions
+        .insert(node.id.clone(), interactive_shapes);
 
     // Update or create caches for each layer.
     for (layer_name, shapes_val) in &layer_map {
@@ -1248,5 +2042,187 @@ mod tests {
             }
             _ => panic!("expected solid fill"),
         }
+    }
+
+    // -- Hit testing --
+
+    #[test]
+    fn hit_test_rect_inside() {
+        let region = HitRegion::Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        };
+        assert!(hit_test(Point::new(25.0, 40.0), &region));
+    }
+
+    #[test]
+    fn hit_test_rect_outside() {
+        let region = HitRegion::Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 30.0,
+            h: 40.0,
+        };
+        assert!(!hit_test(Point::new(5.0, 40.0), &region));
+    }
+
+    #[test]
+    fn hit_test_circle_inside() {
+        let region = HitRegion::Circle {
+            cx: 50.0,
+            cy: 50.0,
+            r: 20.0,
+        };
+        assert!(hit_test(Point::new(50.0, 50.0), &region));
+        assert!(hit_test(Point::new(60.0, 50.0), &region));
+    }
+
+    #[test]
+    fn hit_test_circle_outside() {
+        let region = HitRegion::Circle {
+            cx: 50.0,
+            cy: 50.0,
+            r: 20.0,
+        };
+        assert!(!hit_test(Point::new(80.0, 50.0), &region));
+    }
+
+    #[test]
+    fn hit_test_line_near() {
+        let region = HitRegion::Line {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 100.0,
+            y2: 0.0,
+            half_width: 5.0,
+        };
+        assert!(hit_test(Point::new(50.0, 3.0), &region));
+        assert!(!hit_test(Point::new(50.0, 10.0), &region));
+    }
+
+    #[test]
+    fn hit_test_line_endpoint() {
+        let region = HitRegion::Line {
+            x1: 10.0,
+            y1: 10.0,
+            x2: 10.0,
+            y2: 10.0,
+            half_width: 5.0,
+        };
+        // Degenerate line (zero length) -- treated as point.
+        assert!(hit_test(Point::new(12.0, 10.0), &region));
+        assert!(!hit_test(Point::new(20.0, 10.0), &region));
+    }
+
+    // -- Interactive shape parsing --
+
+    #[test]
+    fn parse_interactive_rect() {
+        let shape = json!({
+            "type": "rect",
+            "x": 10, "y": 20, "w": 30, "h": 40,
+            "fill": "#ff0000",
+            "interactive": {
+                "id": "bar-1",
+                "on_click": true,
+                "on_hover": true,
+                "cursor": "pointer",
+                "tooltip": "Bar 1: 200 units"
+            }
+        });
+        let result = parse_interactive_shape(&shape, "default").unwrap();
+        assert_eq!(result.id, "bar-1");
+        assert!(result.on_click);
+        assert!(result.on_hover);
+        assert_eq!(result.cursor.as_deref(), Some("pointer"));
+        assert_eq!(result.tooltip.as_deref(), Some("Bar 1: 200 units"));
+        assert!(matches!(
+            result.hit_region,
+            HitRegion::Rect {
+                x: _,
+                y: _,
+                w: _,
+                h: _
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_interactive_circle() {
+        let shape = json!({
+            "type": "circle",
+            "x": 50, "y": 50, "r": 20,
+            "interactive": {
+                "id": "dot-1",
+                "on_click": true,
+                "draggable": true,
+                "drag_axis": "x"
+            }
+        });
+        let result = parse_interactive_shape(&shape, "layer1").unwrap();
+        assert_eq!(result.id, "dot-1");
+        assert!(result.draggable);
+        assert_eq!(result.drag_axis, DragAxis::X);
+        assert!(matches!(result.hit_region, HitRegion::Circle { .. }));
+    }
+
+    #[test]
+    fn parse_interactive_with_hit_rect() {
+        let shape = json!({
+            "type": "path",
+            "commands": [["move_to", 0, 0], ["line_to", 100, 100]],
+            "interactive": {
+                "id": "path-1",
+                "on_click": true,
+                "hit_rect": {"x": 0, "y": 0, "w": 100, "h": 100}
+            }
+        });
+        let result = parse_interactive_shape(&shape, "default").unwrap();
+        assert_eq!(result.id, "path-1");
+        assert!(matches!(result.hit_region, HitRegion::Rect { .. }));
+    }
+
+    #[test]
+    fn parse_interactive_missing_id_returns_none() {
+        let shape = json!({
+            "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10,
+            "interactive": {"on_click": true}
+        });
+        assert!(parse_interactive_shape(&shape, "default").is_none());
+    }
+
+    #[test]
+    fn parse_interactive_no_field_returns_none() {
+        let shape = json!({"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10});
+        assert!(parse_interactive_shape(&shape, "default").is_none());
+    }
+
+    // -- Hit region to rect --
+
+    #[test]
+    fn hit_region_to_rect_circle() {
+        let rect = hit_region_to_rect(&HitRegion::Circle {
+            cx: 50.0,
+            cy: 50.0,
+            r: 20.0,
+        });
+        assert!((rect.x - 30.0).abs() < 0.01);
+        assert!((rect.y - 30.0).abs() < 0.01);
+        assert!((rect.width - 40.0).abs() < 0.01);
+        assert!((rect.height - 40.0).abs() < 0.01);
+    }
+
+    // -- Style merging --
+
+    #[test]
+    fn merge_shape_style_overrides_fill() {
+        let shape = json!({"type": "rect", "fill": "#ff0000", "stroke": {"color": "#000"}});
+        let overrides = json!({"fill": "#00ff00"});
+        let merged = merge_shape_style(&shape, &overrides);
+        assert_eq!(merged["fill"], "#00ff00");
+        // Non-overridden fields preserved.
+        assert_eq!(merged["stroke"]["color"], "#000");
     }
 }

@@ -58,7 +58,12 @@ pub(crate) fn process_widget_message(
         | Message::MouseAreaMove(..)
         | Message::MouseAreaScroll(..)
         | Message::CanvasEvent { .. }
-        | Message::CanvasScroll { .. }) => message_to_event(m).into_iter().collect(),
+        | Message::CanvasScroll { .. }
+        | Message::CanvasShapeEnter { .. }
+        | Message::CanvasShapeLeave { .. }
+        | Message::CanvasShapeClick { .. }
+        | Message::CanvasShapeDrag { .. }
+        | Message::CanvasShapeDragEnd { .. }) => message_to_event(m).into_iter().collect(),
 
         // Slider -- needs value tracking for SlideRelease.
         Message::Slide(id, value) => {

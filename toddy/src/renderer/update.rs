@@ -40,6 +40,11 @@ impl App {
             | Message::MouseAreaScroll(..)
             | Message::CanvasEvent { .. }
             | Message::CanvasScroll { .. }
+            | Message::CanvasShapeEnter { .. }
+            | Message::CanvasShapeLeave { .. }
+            | Message::CanvasShapeClick { .. }
+            | Message::CanvasShapeDrag { .. }
+            | Message::CanvasShapeDragEnd { .. }
             | Message::Slide(..)
             | Message::SlideRelease(..)
             | Message::TextEditorAction(..)
