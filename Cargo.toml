@@ -37,7 +37,3 @@ unreachable_patterns = "deny"
 # codegen-units = 1    # single codegen unit, better optimization opportunities
 # opt-level = "z"      # optimize for size over speed (UI is GPU-bound, not CPU)
 # strip = true         # remove symbol names from the binary
-
-[patch.crates-io]
-plushie-iced = { path = "../plushie-iced" }
-plushie-iced-test = { path = "../plushie-iced/test" }
