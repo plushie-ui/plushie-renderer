@@ -63,11 +63,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`click_element` / `focus_element` test interact actions.**
 - **`CanvasElementFocusChanged` message.** Single message for blur+focus
   transitions, split into separate outgoing events by the emitter.
+- **Theme-aware canvas colors.** Color strings in fill, stroke, and text
+  that match iced palette names (`"primary"`, `"text"`, `"background"`,
+  `"success"`, `"danger"`, `"warning"`) are resolved against the current
+  theme at draw time. Canvas shapes now participate in the theme system.
 
 ### Fixed
 
 - WASM build: replaced `wasm-opt --all-features` with explicit feature
   flags for compatibility with older wasm-opt versions.
+- Canvas style overrides (hover_style, pressed_style, focus_style) now
+  correctly read from the group, not from children.
+- Canvas keyboard events now work when the mouse cursor is outside the
+  canvas bounds.
+- Canvas focus visuals (focus ring, focus_style) clear when the canvas
+  loses iced-level focus.
+- `text_editor` cursor no longer resets on every keystroke. Content hash
+  is updated after TextEditorAction to prevent stale prop sync.
+- `text_editor` cursor movement, selection, and click-to-position now
+  work. All actions (not just edits) are performed on the Content.
 
 ## [0.4.1] - 2026-03-22
 

@@ -1430,6 +1430,19 @@ fn merge_shape_style(shape: &Value, overrides: &Value) -> Value {
 ///
 /// The element's accumulated transform is applied to the frame so the
 /// ring matches the element's visual position, including rotation and scale.
+/// Draw a focus ring around an interactive element.
+///
+/// The ring shape adapts to the element's hit region geometry:
+/// - **Rect**: rounded rectangle inflated by `inflate` on each side
+/// - **Circle**: circle inflated by `inflate`
+/// - **Line**: capsule (stadium) around the line, inflated by `inflate`
+///
+/// The element's accumulated transform is applied to the frame so the
+/// ring matches the element's visual position, including rotation and scale.
+///
+/// **Clipping note**: when the hit region fills the entire canvas, the
+/// outset ring may be clipped. SDKs should add padding to the canvas
+/// (e.g. 4px on each side) to accommodate the focus ring.
 fn draw_focus_ring(
     frame: &mut canvas::Frame,
     element: &InteractiveElement,
@@ -2184,6 +2197,36 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         bounds: iced::Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<iced::widget::Action<Message>> {
+        // Keyboard events don't depend on cursor position -- handle them
+        // before the cursor check so they work when the mouse is outside.
+        if matches!(event, iced::Event::Keyboard(..)) {
+            if !self.interactive_elements.is_empty() {
+                if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event {
+                    return self.handle_keyboard(state, key, *modifiers);
+                }
+            }
+            return None;
+        }
+
+        // Consume pending programmatic focus (not position-dependent).
+        if let Some(ref pending) = self.pending_focus {
+            if state.last_consumed_pending.as_deref() != Some(pending.as_str()) {
+                state.last_consumed_pending = Some(pending.clone());
+                let idx = self
+                    .interactive_elements
+                    .iter()
+                    .position(|e| e.id == *pending);
+                if let Some(idx) = idx {
+                    if let Some(msg) = self.set_focus(state, Some(idx)) {
+                        state.focused_group = self.interactive_elements[idx]
+                            .parent_group
+                            .clone();
+                        return Some(iced::widget::Action::publish(msg));
+                    }
+                }
+            }
+        }
+
         let position = match cursor.position_in(bounds) {
             Some(pos) => {
                 state.cursor_position = Some(pos);
@@ -2220,27 +2263,6 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 return action;
             }
         };
-
-        // Consume pending programmatic focus from focus_element widget_op.
-        // The cache entry persists across frames (can't drain from immutable
-        // ref), so we track consumption in state to prevent re-firing.
-        if let Some(ref pending) = self.pending_focus {
-            if state.last_consumed_pending.as_deref() != Some(pending.as_str()) {
-                state.last_consumed_pending = Some(pending.clone());
-                let idx = self
-                    .interactive_elements
-                    .iter()
-                    .position(|e| e.id == *pending);
-                if let Some(idx) = idx {
-                    if let Some(msg) = self.set_focus(state, Some(idx)) {
-                        state.focused_group = self.interactive_elements[idx]
-                            .parent_group
-                            .clone();
-                        return Some(iced::widget::Action::publish(msg));
-                    }
-                }
-            }
-        }
 
         match event {
             iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -2455,12 +2477,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 }))
             }
 
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-                if !self.interactive_elements.is_empty() =>
-            {
-                self.handle_keyboard(state, key, *modifiers)
-            }
-
+            // Keyboard events are handled before the cursor position check
+            // (at the top of update) so they work when the cursor is outside.
             _ => None,
         }
     }

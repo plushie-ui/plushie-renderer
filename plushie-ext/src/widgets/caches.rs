@@ -149,6 +149,15 @@ impl WidgetCaches {
     pub fn set_canvas_pending_focus(&mut self, canvas_id: String, element_id: String) {
         self.canvas_pending_focus.insert(canvas_id, element_id);
     }
+
+    /// Update the cached prop hash for a text_editor after the Content
+    /// was mutated by a `TextEditorAction`. This prevents
+    /// `ensure_text_editor_cache` from resetting the Content (and losing
+    /// cursor position) when the host's prop lags one frame behind.
+    pub fn update_editor_content_hash(&mut self, id: &str, text: &str) {
+        self.editor_content_hashes
+            .insert(id.to_string(), hash_str(text));
+    }
 }
 
 // ---------------------------------------------------------------------------

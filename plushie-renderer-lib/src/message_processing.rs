@@ -106,12 +106,18 @@ pub fn process_widget_message(
 
         // Text editor -- apply action to content, emit new text.
         Message::TextEditorAction(id, action) => {
-            if action.is_edit()
-                && let Some(content) = caches.editor_content_mut(&id)
-            {
+            if let Some(content) = caches.editor_content_mut(&id) {
+                let is_edit = action.is_edit();
                 content.perform(action);
-                let new_text = content.text();
-                return vec![OutgoingEvent::input(id, new_text)];
+
+                if is_edit {
+                    let new_text = content.text();
+                    // Update the prop hash to match the mutated Content so
+                    // ensure_text_editor_cache doesn't reset on the host's
+                    // lagging prop.
+                    caches.update_editor_content_hash(&id, &new_text);
+                    return vec![OutgoingEvent::input(id, new_text)];
+                }
             }
             vec![]
         }
