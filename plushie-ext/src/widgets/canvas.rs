@@ -257,6 +257,43 @@ impl TransformMatrix {
     }
 }
 
+/// Arrow key navigation mode for canvas interactive elements.
+///
+/// Controls how arrow keys behave at the boundaries of the element list.
+/// Set via the `"arrow_mode"` prop on the canvas widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ArrowMode {
+    /// Arrows wrap around at boundaries (last -> first, first -> last).
+    /// Always captures the event. This is the standard roving tabindex
+    /// pattern for composite widgets like toolbars and radio groups.
+    #[default]
+    Wrap,
+    /// Arrows stop at first/last element (no wrapping). Captures the event.
+    Clamp,
+    /// Arrows navigate but return `None` at boundaries, letting the event
+    /// propagate to parent widgets. Useful for canvases inside scrollable
+    /// containers where arrows should scroll at the edges.
+    Linear,
+    /// Arrows are not handled by the canvas at all. Elements are only
+    /// navigable via Tab. Useful when arrow keys have app-specific meaning.
+    None,
+}
+
+impl ArrowMode {
+    fn from_str(s: &str) -> Self {
+        match s {
+            "wrap" => Self::Wrap,
+            "clamp" => Self::Clamp,
+            "linear" => Self::Linear,
+            "none" => Self::None,
+            _ => {
+                log::warn!("canvas: unknown arrow_mode '{s}', defaulting to 'wrap'");
+                Self::Wrap
+            }
+        }
+    }
+}
+
 /// Axis constraint for draggable shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DragAxis {
@@ -882,6 +919,8 @@ struct CanvasProgram<'a> {
     images: &'a crate::image_registry::ImageRegistry,
     /// Interactive elements parsed during ensure_caches.
     interactive_elements: &'a [InteractiveElement],
+    /// Arrow key navigation mode.
+    arrow_mode: ArrowMode,
 }
 
 impl CanvasProgram<'_> {
@@ -2134,19 +2173,42 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             Some(idx) => focus_to(state, Some(idx - 1)),
                         }
                     }
-                    keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight) => {
-                        let next = match current_idx {
-                            None => 0,
-                            Some(idx) => (idx + 1) % count,
-                        };
-                        focus_to(state, Some(next))
+                    keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight)
+                        if self.arrow_mode != ArrowMode::None =>
+                    {
+                        match (current_idx, self.arrow_mode) {
+                            (None, _) => focus_to(state, Some(0)),
+                            (Some(idx), ArrowMode::Wrap) => {
+                                focus_to(state, Some((idx + 1) % count))
+                            }
+                            (Some(idx), _) if idx + 1 < count => {
+                                focus_to(state, Some(idx + 1))
+                            }
+                            (Some(_), ArrowMode::Clamp) => {
+                                // At last element, clamped. Capture but don't move.
+                                Some(iced::widget::Action::capture())
+                            }
+                            (Some(_), ArrowMode::Linear) => {
+                                // At last element, linear. Let arrow propagate.
+                                None
+                            }
+                            _ => None,
+                        }
                     }
-                    keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft) => {
-                        let prev = match current_idx {
-                            None | Some(0) => count - 1,
-                            Some(idx) => idx - 1,
-                        };
-                        focus_to(state, Some(prev))
+                    keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft)
+                        if self.arrow_mode != ArrowMode::None =>
+                    {
+                        match (current_idx, self.arrow_mode) {
+                            (None, _) => focus_to(state, Some(count - 1)),
+                            (Some(0), ArrowMode::Wrap) => {
+                                focus_to(state, Some(count - 1))
+                            }
+                            (Some(0), ArrowMode::Clamp) => {
+                                Some(iced::widget::Action::capture())
+                            }
+                            (Some(0), ArrowMode::Linear) => None,
+                            (Some(idx), _) => focus_to(state, Some(idx - 1)),
+                        }
                     }
                     keyboard::Key::Named(Named::Enter | Named::Space) => {
                         if let Some(idx) = current_idx {
@@ -2494,6 +2556,9 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
         on_scroll: on_scroll || interactive,
         images: ctx.images,
         interactive_elements,
+        arrow_mode: prop_str(props, "arrow_mode")
+            .map(|s| ArrowMode::from_str(&s))
+            .unwrap_or_default(),
     })
     .width(width)
     .height(height);
@@ -3742,6 +3807,7 @@ mod tests {
             on_scroll: false,
             images: &IMAGES,
             interactive_elements: elements,
+            arrow_mode: ArrowMode::Wrap,
         }
     }
 
@@ -4196,4 +4262,25 @@ mod tests {
     // The decompose + apply_to_frame math is verified by the decompose
     // tests above -- the draw function is straightforward path construction
     // delegating to iced's Path::rounded_rectangle / Path::circle.
+
+    // -- ArrowMode tests --
+
+    #[test]
+    fn arrow_mode_from_str_known_values() {
+        assert_eq!(ArrowMode::from_str("wrap"), ArrowMode::Wrap);
+        assert_eq!(ArrowMode::from_str("clamp"), ArrowMode::Clamp);
+        assert_eq!(ArrowMode::from_str("linear"), ArrowMode::Linear);
+        assert_eq!(ArrowMode::from_str("none"), ArrowMode::None);
+    }
+
+    #[test]
+    fn arrow_mode_from_str_unknown_defaults_to_wrap() {
+        assert_eq!(ArrowMode::from_str("invalid"), ArrowMode::Wrap);
+        assert_eq!(ArrowMode::from_str(""), ArrowMode::Wrap);
+    }
+
+    #[test]
+    fn arrow_mode_default_is_wrap() {
+        assert_eq!(ArrowMode::default(), ArrowMode::Wrap);
+    }
 }
