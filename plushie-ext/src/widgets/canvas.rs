@@ -61,6 +61,148 @@ pub(crate) enum HitRegion {
     },
 }
 
+/// 2D affine transform matrix for mapping between coordinate spaces.
+///
+/// Stored as a 2x3 matrix `[a, b, c, d, tx, ty]` representing:
+/// ```text
+/// | a  b  tx |
+/// | c  d  ty |
+/// | 0  0   1 |
+/// ```
+///
+/// Transforms are composed by multiplication. Points are transformed as:
+/// ```text
+/// x' = a*x + b*y + tx
+/// y' = c*x + d*y + ty
+/// ```
+///
+/// Used to map cursor positions from canvas space into an element's local
+/// coordinate space for hit testing. Each [`InteractiveElement`] stores
+/// the accumulated matrix from all ancestor group transforms and its
+/// inverse (precomputed for efficient per-frame hit testing).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TransformMatrix {
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+    pub d: f32,
+    pub tx: f32,
+    pub ty: f32,
+}
+
+impl TransformMatrix {
+    /// The identity matrix (no transformation).
+    pub fn identity() -> Self {
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    /// Append a translation to this matrix.
+    pub fn translate(self, x: f32, y: f32) -> Self {
+        Self {
+            a: self.a,
+            b: self.b,
+            c: self.c,
+            d: self.d,
+            tx: self.a * x + self.b * y + self.tx,
+            ty: self.c * x + self.d * y + self.ty,
+        }
+    }
+
+    /// Append a rotation (in radians) to this matrix.
+    pub fn rotate(self, angle: f32) -> Self {
+        let cos = angle.cos();
+        let sin = angle.sin();
+        Self {
+            a: self.a * cos + self.b * sin,
+            b: self.b * cos - self.a * sin,
+            c: self.c * cos + self.d * sin,
+            d: self.d * cos - self.c * sin,
+            tx: self.tx,
+            ty: self.ty,
+        }
+    }
+
+    /// Append a non-uniform scale to this matrix.
+    pub fn scale(self, sx: f32, sy: f32) -> Self {
+        Self {
+            a: self.a * sx,
+            b: self.b * sy,
+            c: self.c * sx,
+            d: self.d * sy,
+            tx: self.tx,
+            ty: self.ty,
+        }
+    }
+
+    /// Transform a point from the source coordinate space to the
+    /// destination coordinate space.
+    pub fn transform_point(&self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.a * x + self.b * y + self.tx,
+            self.c * x + self.d * y + self.ty,
+        )
+    }
+
+    /// Compute the inverse matrix, or `None` if the matrix is singular
+    /// (determinant is zero, meaning the transform collapses a dimension).
+    pub fn inverse(&self) -> Option<Self> {
+        let det = self.a * self.d - self.b * self.c;
+        if det.abs() < 1e-10 {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        Some(Self {
+            a: self.d * inv_det,
+            b: -self.b * inv_det,
+            c: -self.c * inv_det,
+            d: self.a * inv_det,
+            tx: (self.b * self.ty - self.d * self.tx) * inv_det,
+            ty: (self.c * self.tx - self.a * self.ty) * inv_det,
+        })
+    }
+
+    /// Build a matrix from a group's `"transforms"` JSON array.
+    ///
+    /// Applies each transform entry in order: translate, rotate, scale.
+    /// Returns the composed matrix.
+    pub fn from_transforms(transforms: &[Value]) -> Self {
+        let mut m = Self::identity();
+        for t in transforms {
+            let t_type = t.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match t_type {
+                "translate" => {
+                    let x = t.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let y = t.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    m = m.translate(x, y);
+                }
+                "rotate" => {
+                    let angle = t.get("angle").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    m = m.rotate(angle);
+                }
+                "scale" => {
+                    if let Some(factor) = t.get("factor").and_then(|v| v.as_f64()) {
+                        let f = factor as f32;
+                        m = m.scale(f, f);
+                    } else {
+                        let sx = t.get("x").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+                        let sy = t.get("y").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+                        m = m.scale(sx, sy);
+                    }
+                }
+                _ => {}
+            }
+        }
+        m
+    }
+}
+
 /// Axis constraint for draggable shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DragAxis {
@@ -93,8 +235,21 @@ pub(crate) struct InteractiveElement {
     pub id: String,
     /// Which layer this element belongs to.
     pub layer: String,
-    /// Geometric bounds for hit testing (in local coordinates).
+    /// Geometric bounds for hit testing (in local group coordinates).
+    /// Use [`inverse_transform`](Self::inverse_transform) to map cursor
+    /// positions from canvas space into this local space.
     pub hit_region: HitRegion,
+    /// Accumulated transform from canvas origin to this element's local
+    /// coordinate space. Composed from all ancestor group transforms.
+    pub transform: TransformMatrix,
+    /// Precomputed inverse of [`transform`](Self::transform). Used to
+    /// map cursor positions from canvas space to local space for hit
+    /// testing. `None` if the transform is singular (degenerate).
+    pub inverse_transform: Option<TransformMatrix>,
+    /// Optional clip rectangle in canvas space. If set, the element is
+    /// only hittable when the cursor is inside this rect. Derived from
+    /// ancestor group `"clip"` fields, transformed to canvas space.
+    pub clip_rect: Option<(f32, f32, f32, f32)>,
     pub on_click: bool,
     pub on_hover: bool,
     pub draggable: bool,
@@ -131,10 +286,21 @@ struct DragState {
 }
 
 /// Test whether a point is inside a hit region.
+///
+/// Uses a small epsilon (0.5px) for boundary comparisons to handle
+/// floating-point imprecision from transform matrix inversion. Without
+/// this, points exactly on the boundary of a rotated element would
+/// sometimes miss due to rounding errors.
 fn hit_test(point: Point, region: &HitRegion) -> bool {
+    /// Half-pixel tolerance for boundary comparisons after transform.
+    const EPS: f32 = 0.5;
+
     match *region {
         HitRegion::Rect { x, y, w, h } => {
-            point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h
+            point.x >= x - EPS
+                && point.x <= x + w + EPS
+                && point.y >= y - EPS
+                && point.y <= y + h + EPS
         }
         HitRegion::Circle { cx, cy, r } => {
             let dx = point.x - cx;
@@ -171,11 +337,34 @@ fn hit_test(point: Point, region: &HitRegion) -> bool {
 /// Find the topmost interactive element under the given point.
 ///
 /// Elements are tested in reverse order (last in list = topmost drawn = tested first).
+/// The cursor point (in canvas space) is transformed into each element's
+/// local coordinate space using the precomputed inverse transform matrix
+/// before testing against the local-coordinate hit region.
+///
+/// Elements with a `clip_rect` are only hittable when the cursor is
+/// inside the clip rectangle (tested in canvas space, before transform).
 fn find_hit_element(point: Point, elements: &[InteractiveElement]) -> Option<&InteractiveElement> {
-    elements
-        .iter()
-        .rev()
-        .find(|e| (e.on_click || e.on_hover || e.draggable) && hit_test(point, &e.hit_region))
+    elements.iter().rev().find(|e| {
+        if !(e.on_click || e.on_hover || e.draggable) {
+            return false;
+        }
+        // Clip test in canvas space.
+        if let Some((cx, cy, cw, ch)) = e.clip_rect {
+            if point.x < cx || point.x > cx + cw || point.y < cy || point.y > cy + ch {
+                return false;
+            }
+        }
+        // Transform cursor to element's local space.
+        let local = match &e.inverse_transform {
+            Some(inv) => {
+                let (lx, ly) = inv.transform_point(point.x, point.y);
+                Point::new(lx, ly)
+            }
+            // Singular transform -- element can't be hit.
+            None => return false,
+        };
+        hit_test(local, &e.hit_region)
+    })
 }
 
 /// Parse an [`InteractiveElement`] from a group's top-level JSON fields.
@@ -271,6 +460,12 @@ fn parse_interactive_element(group: &Value, layer_name: &str) -> Option<Interact
         id,
         layer: layer_name.to_string(),
         hit_region,
+        // Transform fields are set by collect_interactive_elements after
+        // parsing. Defaults here represent a top-level element with no
+        // ancestor transforms or clips.
+        transform: TransformMatrix::identity(),
+        inverse_transform: Some(TransformMatrix::identity()),
+        clip_rect: None,
         on_click: group
             .get("on_click")
             .and_then(|v| v.as_bool())
@@ -2145,17 +2340,21 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 // ---------------------------------------------------------------------------
 
 /// Recursively collect interactive elements from a shape array, descending
-/// into groups. `offset_x`/`offset_y` accumulate group translations
-/// (extracted from the `"transforms"` array) so nested elements' hit
-/// regions are in canvas-space coordinates.
+/// into groups. The `parent_transform` accumulates the full 2D affine
+/// transform from all ancestor groups, enabling correct hit testing for
+/// rotated, scaled, and translated elements.
+///
+/// The optional `parent_clip` is the intersection of all ancestor clip
+/// rectangles (in canvas space). Elements are only hittable when the
+/// cursor falls within this clip region.
 ///
 /// Only groups with an `"id"` field are collected as interactive elements.
 /// Non-group shapes are skipped regardless of any fields they carry.
 fn collect_interactive_elements(
     shapes: &[Value],
     layer_name: &str,
-    offset_x: f32,
-    offset_y: f32,
+    parent_transform: TransformMatrix,
+    parent_clip: Option<(f32, f32, f32, f32)>,
     out: &mut Vec<InteractiveElement>,
 ) {
     for shape in shapes {
@@ -2168,57 +2367,90 @@ fn collect_interactive_elements(
             continue;
         }
 
+        // Compose this group's transforms with the parent's accumulated matrix.
+        let group_matrix = match shape.get("transforms").and_then(|v| v.as_array()) {
+            Some(arr) if !arr.is_empty() => {
+                let local = TransformMatrix::from_transforms(arr);
+                // Parent * local = canvas-space transform for this group.
+                // Since our transforms are "append" style (translate/rotate/scale
+                // applied left-to-right), the composition is: parent first, then local.
+                TransformMatrix {
+                    a: parent_transform.a * local.a + parent_transform.b * local.c,
+                    b: parent_transform.a * local.b + parent_transform.b * local.d,
+                    c: parent_transform.c * local.a + parent_transform.d * local.c,
+                    d: parent_transform.c * local.b + parent_transform.d * local.d,
+                    tx: parent_transform.a * local.tx + parent_transform.b * local.ty + parent_transform.tx,
+                    ty: parent_transform.c * local.tx + parent_transform.d * local.ty + parent_transform.ty,
+                }
+            }
+            _ => parent_transform,
+        };
+
+        // Intersect this group's clip (if any) with parent clip.
+        // The clip rect is in the group's local space -- transform its
+        // corners to canvas space and take the axis-aligned bounding box.
+        let group_clip = if let Some(clip) = shape.get("clip").and_then(|v| v.as_object()) {
+            let cx = clip.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let cy = clip.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let cw = clip.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let ch = clip.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+
+            // Transform clip rect corners to canvas space.
+            let corners = [
+                group_matrix.transform_point(cx, cy),
+                group_matrix.transform_point(cx + cw, cy),
+                group_matrix.transform_point(cx, cy + ch),
+                group_matrix.transform_point(cx + cw, cy + ch),
+            ];
+            let min_x = corners.iter().map(|c| c.0).fold(f32::MAX, f32::min);
+            let min_y = corners.iter().map(|c| c.1).fold(f32::MAX, f32::min);
+            let max_x = corners.iter().map(|c| c.0).fold(f32::MIN, f32::max);
+            let max_y = corners.iter().map(|c| c.1).fold(f32::MIN, f32::max);
+
+            let clip_in_canvas = (min_x, min_y, max_x - min_x, max_y - min_y);
+
+            // Intersect with parent clip.
+            match parent_clip {
+                Some(pc) => Some(intersect_rects(pc, clip_in_canvas)),
+                None => Some(clip_in_canvas),
+            }
+        } else {
+            parent_clip
+        };
+
         // Collect this group if it's interactive (has an id).
         if let Some(mut element) = parse_interactive_element(shape, layer_name) {
-            if offset_x != 0.0 || offset_y != 0.0 {
-                element.hit_region = offset_hit_region(&element.hit_region, offset_x, offset_y);
-            }
+            element.transform = group_matrix;
+            element.inverse_transform = group_matrix.inverse();
+            element.clip_rect = group_clip;
             out.push(element);
         }
 
         // Recurse into group children to find nested interactive elements.
         if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
-            let (gx, gy) = group_translation(shape);
-            collect_interactive_elements(
-                children,
-                layer_name,
-                offset_x + gx,
-                offset_y + gy,
-                out,
-            );
+            collect_interactive_elements(children, layer_name, group_matrix, group_clip, out);
         }
     }
 }
 
-/// Translate a hit region by the given offset.
-fn offset_hit_region(region: &HitRegion, dx: f32, dy: f32) -> HitRegion {
-    match *region {
-        HitRegion::Rect { x, y, w, h } => HitRegion::Rect {
-            x: x + dx,
-            y: y + dy,
-            w,
-            h,
-        },
-        HitRegion::Circle { cx, cy, r } => HitRegion::Circle {
-            cx: cx + dx,
-            cy: cy + dy,
-            r,
-        },
-        HitRegion::Line {
-            x1,
-            y1,
-            x2,
-            y2,
-            half_width,
-        } => HitRegion::Line {
-            x1: x1 + dx,
-            y1: y1 + dy,
-            x2: x2 + dx,
-            y2: y2 + dy,
-            half_width,
-        },
-    }
+/// Intersect two axis-aligned rectangles. Returns the intersection rect
+/// as `(x, y, w, h)`. If the rectangles don't overlap, returns a
+/// zero-area rect (w=0 or h=0).
+fn intersect_rects(
+    a: (f32, f32, f32, f32),
+    b: (f32, f32, f32, f32),
+) -> (f32, f32, f32, f32) {
+    let x = a.0.max(b.0);
+    let y = a.1.max(b.1);
+    let w = ((a.0 + a.2).min(b.0 + b.2) - x).max(0.0);
+    let h = ((a.1 + a.3).min(b.1 + b.3) - y).max(0.0);
+    (x, y, w, h)
 }
+
+// offset_hit_region removed -- transforms are now handled by the
+// TransformMatrix stored on each InteractiveElement. Hit regions
+// stay in local coordinates; the inverse matrix maps cursor positions
+// from canvas space to local space during hit testing.
 
 pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut WidgetCaches) {
     let props = node.props.as_object();
@@ -2230,7 +2462,7 @@ pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut
     let mut interactive_elements = Vec::new();
     for (layer_name, shapes_val) in &layer_map {
         if let Some(shapes_arr) = shapes_val.as_array() {
-            collect_interactive_elements(shapes_arr, layer_name, 0.0, 0.0, &mut interactive_elements);
+            collect_interactive_elements(shapes_arr, layer_name, TransformMatrix::identity(), None, &mut interactive_elements);
         }
     }
     caches
@@ -2896,7 +3128,7 @@ mod tests {
             }),
         ];
         let mut result = Vec::new();
-        collect_interactive_elements(&shapes, "default", 0.0, 0.0, &mut result);
+        collect_interactive_elements(&shapes, "default", TransformMatrix::identity(), None, &mut result);
         let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
         // Non-group "top-rect" is NOT collected.
         assert!(!ids.contains(&"top-rect"));
@@ -2975,5 +3207,198 @@ mod tests {
             }
             other => panic!("expected Rect, got {other:?}"),
         }
+    }
+
+    // -- TransformMatrix tests --
+
+    #[test]
+    fn transform_identity() {
+        let m = TransformMatrix::identity();
+        let (x, y) = m.transform_point(10.0, 20.0);
+        assert!((x - 10.0).abs() < 0.001);
+        assert!((y - 20.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn transform_translate() {
+        let m = TransformMatrix::identity().translate(50.0, 30.0);
+        let (x, y) = m.transform_point(10.0, 20.0);
+        assert!((x - 60.0).abs() < 0.001);
+        assert!((y - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn transform_rotate_90() {
+        let m = TransformMatrix::identity().rotate(std::f32::consts::FRAC_PI_2);
+        // (10, 0) rotated 90 degrees CCW -> (0, 10)
+        let (x, y) = m.transform_point(10.0, 0.0);
+        assert!(x.abs() < 0.001, "x should be ~0, got {x}");
+        assert!((y - 10.0).abs() < 0.001, "y should be ~10, got {y}");
+    }
+
+    #[test]
+    fn transform_scale() {
+        let m = TransformMatrix::identity().scale(2.0, 3.0);
+        let (x, y) = m.transform_point(10.0, 20.0);
+        assert!((x - 20.0).abs() < 0.001);
+        assert!((y - 60.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn transform_inverse_roundtrip() {
+        let m = TransformMatrix::identity()
+            .translate(50.0, 30.0)
+            .rotate(0.5)
+            .scale(2.0, 1.5);
+        let inv = m.inverse().unwrap();
+        // Forward then inverse should return to original.
+        let (fx, fy) = m.transform_point(10.0, 20.0);
+        let (rx, ry) = inv.transform_point(fx, fy);
+        assert!((rx - 10.0).abs() < 0.01, "roundtrip x: expected 10, got {rx}");
+        assert!((ry - 20.0).abs() < 0.01, "roundtrip y: expected 20, got {ry}");
+    }
+
+    #[test]
+    fn transform_singular_has_no_inverse() {
+        // Scale to zero on one axis -> singular.
+        let m = TransformMatrix::identity().scale(0.0, 1.0);
+        assert!(m.inverse().is_none());
+    }
+
+    #[test]
+    fn transform_from_json() {
+        let transforms = vec![
+            json!({"type": "translate", "x": 50.0, "y": 30.0}),
+            json!({"type": "rotate", "angle": 0.0}),
+            json!({"type": "scale", "factor": 2.0}),
+        ];
+        let m = TransformMatrix::from_transforms(&transforms);
+        // translate(50,30) then scale(2) -> point (10,20) becomes (50+10*2, 30+20*2) = (70, 70)
+        let (x, y) = m.transform_point(10.0, 20.0);
+        assert!((x - 70.0).abs() < 0.01, "x={x}");
+        assert!((y - 70.0).abs() < 0.01, "y={y}");
+    }
+
+    #[test]
+    fn find_hit_element_with_transform() {
+        // Group at (100, 100) with a 50x50 rect child.
+        // Cursor at canvas (125, 125) should hit (local 25, 25).
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "btn",
+            "on_click": true,
+            "transforms": [{"type": "translate", "x": 100, "y": 100}],
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 50, "h": 50}]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        assert_eq!(elements.len(), 1);
+
+        // Hit inside.
+        let hit = find_hit_element(Point::new(125.0, 125.0), &elements);
+        assert!(hit.is_some(), "should hit at (125, 125)");
+
+        // Miss outside.
+        let miss = find_hit_element(Point::new(50.0, 50.0), &elements);
+        assert!(miss.is_none(), "should miss at (50, 50)");
+    }
+
+    #[test]
+    fn find_hit_element_with_rotation() {
+        // Group rotated 45 degrees, with a 100x20 rect at origin.
+        // The rect covers a diagonal strip in canvas space.
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "rotated",
+            "on_click": true,
+            "transforms": [{"type": "rotate", "angle": 0.7854}],
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 20}]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+
+        // Canvas point (35, 35) -> local via inverse rotate(-45deg):
+        //   local_x = cos(-45)*35 + (-sin(-45))*35 = 0.707*35 + 0.707*35 ~ 49.5
+        //   local_y = sin(-45)*35 + cos(-45)*35 = -0.707*35 + 0.707*35 ~ 0
+        // local (49.5, 0) is inside rect (0,0,100,20). Should hit.
+        let hit = find_hit_element(Point::new(35.0, 35.0), &elements);
+        assert!(hit.is_some(), "should hit along the rotated diagonal");
+
+        // Canvas point (0, 80) -> local:
+        //   local_x = 0.707*0 + 0.707*80 ~ 56.6
+        //   local_y = -0.707*0 + 0.707*80 ~ 56.6
+        // local (56.6, 56.6) is outside rect height 20. Should miss.
+        let miss = find_hit_element(Point::new(0.0, 80.0), &elements);
+        assert!(miss.is_none(), "should miss far from diagonal");
+    }
+
+    #[test]
+    fn find_hit_element_respects_clip() {
+        // Group at (0,0) with a 100x100 rect, but clipped to a 50x50 region.
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "clipped",
+            "on_click": true,
+            "clip": {"x": 0, "y": 0, "w": 50, "h": 50},
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 100}]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+
+        // Inside clip region.
+        let hit = find_hit_element(Point::new(25.0, 25.0), &elements);
+        assert!(hit.is_some(), "should hit inside clip");
+
+        // Inside hit region but outside clip.
+        let miss = find_hit_element(Point::new(75.0, 75.0), &elements);
+        assert!(miss.is_none(), "should miss outside clip despite being in hit region");
+    }
+
+    #[test]
+    fn intersect_rects_overlap() {
+        let r = intersect_rects((0.0, 0.0, 100.0, 100.0), (50.0, 50.0, 100.0, 100.0));
+        assert!((r.0 - 50.0).abs() < 0.01);
+        assert!((r.1 - 50.0).abs() < 0.01);
+        assert!((r.2 - 50.0).abs() < 0.01);
+        assert!((r.3 - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn intersect_rects_no_overlap() {
+        let r = intersect_rects((0.0, 0.0, 10.0, 10.0), (20.0, 20.0, 10.0, 10.0));
+        assert!(r.2 == 0.0 || r.3 == 0.0, "no-overlap should have zero area");
+    }
+
+    #[test]
+    fn collect_nested_transform_accumulates() {
+        // Outer group translated (100, 0), inner group translated (0, 50).
+        // Inner element should have accumulated transform (100, 50).
+        let shapes = vec![json!({
+            "type": "group",
+            "transforms": [{"type": "translate", "x": 100, "y": 0}],
+            "children": [{
+                "type": "group",
+                "id": "inner",
+                "on_click": true,
+                "transforms": [{"type": "translate", "x": 0, "y": 50}],
+                "children": [{"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10}]
+            }]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        assert_eq!(elements.len(), 1);
+        let e = &elements[0];
+        // The transform should map (0,0) to (100, 50).
+        let (tx, ty) = e.transform.transform_point(0.0, 0.0);
+        assert!((tx - 100.0).abs() < 0.01, "tx={tx}");
+        assert!((ty - 50.0).abs() < 0.01, "ty={ty}");
     }
 }
