@@ -39,7 +39,13 @@ const MAX_SHAPES_PER_LAYER: usize = 10_000;
 // ---------------------------------------------------------------------------
 
 /// Geometric region for hit testing an interactive element.
+///
+/// Currently only `Rect` is constructed (groups auto-infer bounding boxes).
+/// `Circle` and `Line` are retained for `hit_test` dispatch, focus ring
+/// geometry, and future `hit_rect` extensions that support non-rectangular
+/// regions.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Circle/Line not yet constructed but used in match arms
 pub(crate) enum HitRegion {
     Rect {
         x: f32,
@@ -1103,7 +1109,6 @@ impl CanvasProgram<'_> {
                 let is_pressed = group_id.is_some_and(|gid| pressed == Some(gid));
                 let is_hovered = group_id.is_some_and(|gid| hovered == Some(gid));
                 let is_focused = group_id.is_some_and(|gid| focused == Some(gid));
-                let group_active = is_pressed || is_hovered || is_focused;
 
                 if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
                     let has_transforms = shape.get("transforms")

@@ -4,6 +4,71 @@ All notable changes to plushie will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Breaking changes
+
+- **Canvas group redesign.** Interactive elements are now groups with
+  top-level fields (`id`, `on_click`, `a11y`, etc.) instead of a nested
+  `"interactive"` sub-object. Only groups can be interactive -- leaf
+  shapes (rect, circle, etc.) are no longer interactive on their own.
+- **Standalone transform/clip commands removed.** `push_transform`,
+  `pop_transform`, `translate`, `rotate`, `scale`, `push_clip`,
+  `pop_clip` are no longer supported as standalone shape types. Use the
+  `transforms` array and `clip` field on groups instead.
+- **Group `x`/`y` fields removed.** Use `transforms: [{"type":
+  "translate", "x": ..., "y": ...}]` instead.
+- **Event families renamed.** `canvas_shape_*` -> `canvas_element_*`,
+  `shape_id` -> `element_id` in event data.
+
+### Added
+
+- **Transforms on groups.** Groups carry an ordered `transforms` array
+  (translate, rotate, scale) and an optional `clip` field, replacing
+  standalone push/pop commands.
+- **Transform-aware hit testing.** Full 2D affine matrix tracks
+  translate, rotate, and scale through nested groups. Cursor positions
+  are mapped to local space via the inverse matrix. Clip regions from
+  ancestor groups are intersected and tested.
+- **Focus lifecycle events.** New event families: `canvas_element_blurred`,
+  `canvas_focused`, `canvas_blurred`, `canvas_group_focused`,
+  `canvas_group_blurred`.
+- **Click-to-focus.** Clicking an interactive element grants the canvas
+  keyboard focus and sets internal focus to the clicked element.
+- **ID-based focus tracking.** Focus survives element reordering between
+  renders. Stale elements are detected and blurred automatically.
+- **Focus style.** New `focus_style` field on groups for visual feedback
+  when keyboard-focused. Priority: pressed > hover > focus.
+- **Suppressible focus ring.** `show_focus_ring: false` disables the
+  default ring (use `focus_style` for custom indicators).
+- **Geometry-aware focus rings.** Ring shape adapts to hit region: rounded
+  rectangle for rect, circle for circle, capsule for line. Full transform
+  support via matrix decomposition.
+- **Arrow mode.** New `arrow_mode` canvas prop: `wrap` (default), `clamp`,
+  `linear`, `none`.
+- **Focusable groups.** Groups with `focusable: true` become Tab stops
+  for two-level navigation. Tab moves between top-level entries, arrows
+  navigate within the focused group.
+- **Canvas accessible role.** New `role` canvas prop (defaults to `group`
+  when interactive, `image` otherwise). `active_descendant` set
+  dynamically from focused element.
+- **Accessibility tree structure.** Focusable groups create parent-child
+  relationships via `traverse()`. Child accessible nodes have widget IDs
+  for `active_descendant` resolution.
+- **Validation diagnostics.** Warnings for: interactive elements without
+  `a11y`, stateful roles missing state props (switch/toggled,
+  radio/selected), elements without set position.
+- **`focus_element` widget op.** Programmatically focus a canvas and set
+  internal focus to a specific element.
+- **`click_element` / `focus_element` test interact actions.**
+- **`CanvasElementFocusChanged` message.** Single message for blur+focus
+  transitions, split into separate outgoing events by the emitter.
+
+### Fixed
+
+- WASM build: replaced `wasm-opt --all-features` with explicit feature
+  flags for compatibility with older wasm-opt versions.
+
 ## [0.4.1] - 2026-03-22
 
 ### Fixed
