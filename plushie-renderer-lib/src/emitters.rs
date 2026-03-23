@@ -251,69 +251,109 @@ pub fn message_to_event(msg: &Message) -> Option<OutgoingEvent> {
             *delta_x,
             *delta_y,
         )),
-        Message::CanvasShapeEnter {
+        Message::CanvasElementEnter {
             canvas_id,
-            shape_id,
+            element_id,
             x,
             y,
-        } => Some(OutgoingEvent::canvas_shape_enter(
+        } => Some(OutgoingEvent::canvas_element_enter(
             canvas_id.clone(),
-            shape_id.clone(),
+            element_id.clone(),
             *x,
             *y,
         )),
-        Message::CanvasShapeLeave {
+        Message::CanvasElementLeave {
             canvas_id,
-            shape_id,
-        } => Some(OutgoingEvent::canvas_shape_leave(
+            element_id,
+        } => Some(OutgoingEvent::canvas_element_leave(
             canvas_id.clone(),
-            shape_id.clone(),
+            element_id.clone(),
         )),
-        Message::CanvasShapeClick {
+        Message::CanvasElementClick {
             canvas_id,
-            shape_id,
+            element_id,
             x,
             y,
             button,
-        } => Some(OutgoingEvent::canvas_shape_click(
+        } => Some(OutgoingEvent::canvas_element_click(
             canvas_id.clone(),
-            shape_id.clone(),
+            element_id.clone(),
             *x,
             *y,
             button.clone(),
         )),
-        Message::CanvasShapeDrag {
+        Message::CanvasElementDrag {
             canvas_id,
-            shape_id,
+            element_id,
             x,
             y,
             delta_x,
             delta_y,
-        } => Some(OutgoingEvent::canvas_shape_drag(
+        } => Some(OutgoingEvent::canvas_element_drag(
             canvas_id.clone(),
-            shape_id.clone(),
+            element_id.clone(),
             *x,
             *y,
             *delta_x,
             *delta_y,
         )),
-        Message::CanvasShapeDragEnd {
+        Message::CanvasElementDragEnd {
             canvas_id,
-            shape_id,
+            element_id,
             x,
             y,
-        } => Some(OutgoingEvent::canvas_shape_drag_end(
+        } => Some(OutgoingEvent::canvas_element_drag_end(
             canvas_id.clone(),
-            shape_id.clone(),
+            element_id.clone(),
             *x,
             *y,
         )),
-        Message::CanvasShapeFocused {
+        Message::CanvasElementFocused {
             canvas_id,
-            shape_id,
-        } => Some(OutgoingEvent::canvas_shape_focused(
+            element_id,
+        } => Some(OutgoingEvent::canvas_element_focused(
             canvas_id.clone(),
-            shape_id.clone(),
+            element_id.clone(),
+        )),
+        Message::CanvasElementBlurred {
+            canvas_id,
+            element_id,
+        } => Some(OutgoingEvent::canvas_element_blurred(
+            canvas_id.clone(),
+            element_id.clone(),
+        )),
+        Message::CanvasFocused { canvas_id } => {
+            Some(OutgoingEvent::canvas_focused(canvas_id.clone()))
+        }
+        Message::CanvasBlurred { canvas_id } => {
+            Some(OutgoingEvent::canvas_blurred(canvas_id.clone()))
+        }
+        Message::CanvasGroupFocused {
+            canvas_id,
+            group_id,
+        } => Some(OutgoingEvent::canvas_group_focused(
+            canvas_id.clone(),
+            group_id.clone(),
+        )),
+        Message::CanvasGroupBlurred {
+            canvas_id,
+            group_id,
+        } => Some(OutgoingEvent::canvas_group_blurred(
+            canvas_id.clone(),
+            group_id.clone(),
+        )),
+        Message::Diagnostic {
+            canvas_id,
+            element_id,
+            level,
+            code,
+            message,
+        } => Some(OutgoingEvent::diagnostic(
+            canvas_id.clone(),
+            element_id.clone(),
+            level,
+            code,
+            message,
         )),
         _ => None,
     }

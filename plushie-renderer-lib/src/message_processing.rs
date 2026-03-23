@@ -59,12 +59,12 @@ pub fn process_widget_message(
         | Message::MouseAreaScroll(..)
         | Message::CanvasEvent { .. }
         | Message::CanvasScroll { .. }
-        | Message::CanvasShapeEnter { .. }
-        | Message::CanvasShapeLeave { .. }
-        | Message::CanvasShapeClick { .. }
-        | Message::CanvasShapeDrag { .. }
-        | Message::CanvasShapeDragEnd { .. }
-        | Message::CanvasShapeFocused { .. }) => message_to_event(m).into_iter().collect(),
+        | Message::CanvasElementEnter { .. }
+        | Message::CanvasElementLeave { .. }
+        | Message::CanvasElementClick { .. }
+        | Message::CanvasElementDrag { .. }
+        | Message::CanvasElementDragEnd { .. }
+        | Message::CanvasElementFocused { .. }) => message_to_event(m).into_iter().collect(),
 
         // Slider -- needs value tracking for SlideRelease.
         Message::Slide(id, value) => {

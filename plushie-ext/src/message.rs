@@ -153,41 +153,76 @@ pub enum Message {
         delta_x: f32,
         delta_y: f32,
     },
-    /// Canvas shape entered (cursor entered interactive shape bounds).
-    CanvasShapeEnter {
+    // -- Canvas element events (interactive group interactions) --
+    /// Cursor entered an interactive element's hit region.
+    CanvasElementEnter {
         canvas_id: String,
-        shape_id: String,
+        element_id: String,
         x: f32,
         y: f32,
     },
-    /// Canvas shape left (cursor exited interactive shape bounds).
-    CanvasShapeLeave { canvas_id: String, shape_id: String },
-    /// Canvas shape clicked (press + release on same shape).
-    CanvasShapeClick {
+    /// Cursor left an interactive element's hit region.
+    CanvasElementLeave {
         canvas_id: String,
-        shape_id: String,
+        element_id: String,
+    },
+    /// Interactive element activated (click or keyboard Enter/Space).
+    /// `button` is `"left"`, `"right"`, `"keyboard"`, or `"test"`.
+    CanvasElementClick {
+        canvas_id: String,
+        element_id: String,
         x: f32,
         y: f32,
         button: String,
     },
-    /// Canvas shape drag (continuous drag on draggable shape).
-    CanvasShapeDrag {
+    /// Continuous drag on a draggable element.
+    CanvasElementDrag {
         canvas_id: String,
-        shape_id: String,
+        element_id: String,
         x: f32,
         y: f32,
         delta_x: f32,
         delta_y: f32,
     },
-    /// Canvas shape drag ended (release after drag).
-    CanvasShapeDragEnd {
+    /// Mouse released after a drag.
+    CanvasElementDragEnd {
         canvas_id: String,
-        shape_id: String,
+        element_id: String,
         x: f32,
         y: f32,
     },
-    /// Canvas shape received keyboard focus.
-    CanvasShapeFocused { canvas_id: String, shape_id: String },
+    /// An interactive element gained keyboard focus.
+    CanvasElementFocused {
+        canvas_id: String,
+        element_id: String,
+    },
+    /// An interactive element lost keyboard focus.
+    CanvasElementBlurred {
+        canvas_id: String,
+        element_id: String,
+    },
+    /// The canvas widget itself gained iced-level focus (Tab or click).
+    CanvasFocused { canvas_id: String },
+    /// The canvas widget itself lost iced-level focus.
+    CanvasBlurred { canvas_id: String },
+    /// A focusable group gained group-level focus (two-level navigation).
+    CanvasGroupFocused {
+        canvas_id: String,
+        group_id: String,
+    },
+    /// A focusable group lost group-level focus.
+    CanvasGroupBlurred {
+        canvas_id: String,
+        group_id: String,
+    },
+    /// Renderer-side validation diagnostic (a11y, hit regions, etc.).
+    Diagnostic {
+        canvas_id: String,
+        element_id: Option<String>,
+        level: String,
+        code: String,
+        message: String,
+    },
     /// PaneGrid pane was resized (grid_id, resize_event).
     PaneResized(String, iced::widget::pane_grid::ResizeEvent),
     /// PaneGrid pane was dragged (grid_id, drag_event).

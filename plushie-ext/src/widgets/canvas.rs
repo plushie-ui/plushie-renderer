@@ -35,10 +35,10 @@ use crate::protocol::TreeNode;
 const MAX_SHAPES_PER_LAYER: usize = 10_000;
 
 // ---------------------------------------------------------------------------
-// Interactive shapes -- hit testing and interaction state
+// Interactive elements -- hit testing and interaction state
 // ---------------------------------------------------------------------------
 
-/// Geometric region for hit testing an interactive shape.
+/// Geometric region for hit testing an interactive element.
 #[derive(Debug, Clone)]
 pub(crate) enum HitRegion {
     Rect {
@@ -79,14 +79,14 @@ pub(crate) struct DragBounds {
     pub max_y: f32,
 }
 
-/// Parsed interactive configuration for a canvas shape.
+/// Parsed interactive configuration for a canvas element.
 ///
 /// Extracted from the `"interactive"` field on shape JSON during
 /// `ensure_caches`. Stored in `WidgetCaches` so `update()` can hit-test
 /// without re-parsing JSON every frame.
 #[derive(Debug, Clone)]
-pub(crate) struct InteractiveShape {
-    /// Unique ID for this shape (from `interactive.id`).
+pub(crate) struct InteractiveElement {
+    /// Unique ID for this element (from `interactive.id`).
     pub id: String,
     /// Which layer this shape belongs to.
     pub layer: String,
@@ -114,7 +114,7 @@ pub(crate) struct InteractiveShape {
 /// Active drag state tracked in `CanvasState`.
 #[derive(Debug, Clone)]
 struct DragState {
-    shape_id: String,
+    element_id: String,
     last: Point,
 }
 
@@ -156,20 +156,20 @@ fn hit_test(point: Point, region: &HitRegion) -> bool {
     }
 }
 
-/// Find the topmost interactive shape under the given point.
+/// Find the topmost interactive element under the given point.
 ///
-/// Shapes are tested in reverse order (last in list = topmost drawn = tested first).
-fn find_hit_shape(point: Point, shapes: &[InteractiveShape]) -> Option<&InteractiveShape> {
-    shapes
+/// Elements are tested in reverse order (last in list = topmost drawn = tested first).
+fn find_hit_element(point: Point, elements: &[InteractiveElement]) -> Option<&InteractiveElement> {
+    elements
         .iter()
         .rev()
-        .find(|s| (s.on_click || s.on_hover || s.draggable) && hit_test(point, &s.hit_region))
+        .find(|e| (e.on_click || e.on_hover || e.draggable) && hit_test(point, &e.hit_region))
 }
 
-/// Parse an `InteractiveShape` from a shape's JSON `"interactive"` field.
+/// Parse an [`InteractiveElement`] from a group's JSON `"interactive"` field.
 ///
 /// Returns `None` if the interactive field is missing or has no `id`.
-fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<InteractiveShape> {
+fn parse_interactive_element(shape: &Value, layer_name: &str) -> Option<InteractiveElement> {
     let interactive = shape.get("interactive")?.as_object()?;
     let id = interactive.get("id")?.as_str()?.to_string();
     if id.is_empty() {
@@ -253,7 +253,7 @@ fn parse_interactive_shape(shape: &Value, layer_name: &str) -> Option<Interactiv
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Some(InteractiveShape {
+    Some(InteractiveElement {
         id,
         layer: layer_name.to_string(),
         hit_region,
@@ -514,7 +514,7 @@ fn parse_cursor_interaction(cursor: &str) -> mouse::Interaction {
         "zoom_out" | "zoom-out" => mouse::Interaction::ZoomOut,
         "col_resize" | "col-resize" => mouse::Interaction::ResizingColumn,
         "row_resize" | "row-resize" => mouse::Interaction::ResizingRow,
-        _ => mouse::Interaction::Pointer, // default for interactive shapes
+        _ => mouse::Interaction::Pointer, // default for interactive elements
     }
 }
 
@@ -567,13 +567,13 @@ fn canvas_layers_from_props(
 #[derive(Default)]
 struct CanvasState {
     cursor_position: Option<Point>,
-    /// ID of the interactive shape currently under the cursor.
-    hovered_shape: Option<String>,
-    /// ID of the shape being pressed (mouse down, not yet released).
-    pressed_shape: Option<String>,
-    /// Active drag state (shape being dragged).
+    /// ID of the interactive element currently under the cursor.
+    hovered_element: Option<String>,
+    /// ID of the element being pressed (mouse down, not yet released).
+    pressed_element: Option<String>,
+    /// Active drag state (element being dragged).
     dragging: Option<DragState>,
-    /// Index of the interactive shape that has keyboard focus.
+    /// Index of the interactive element that has keyboard focus.
     focused_index: Option<usize>,
 }
 
@@ -590,8 +590,8 @@ struct CanvasProgram<'a> {
     on_scroll: bool,
     /// Reference to the image registry for resolving in-memory image handles.
     images: &'a crate::image_registry::ImageRegistry,
-    /// Interactive shapes parsed during ensure_caches.
-    interactive_shapes: &'a [InteractiveShape],
+    /// Interactive elements parsed during ensure_caches.
+    interactive_elements: &'a [InteractiveElement],
 }
 
 impl CanvasProgram<'_> {
@@ -600,7 +600,7 @@ impl CanvasProgram<'_> {
             || self.on_release
             || self.on_move
             || self.on_scroll
-            || !self.interactive_shapes.is_empty()
+            || !self.interactive_elements.is_empty()
     }
 
     /// Find the layer name that currently has an active hover or pressed
@@ -611,11 +611,11 @@ impl CanvasProgram<'_> {
         // layer A while hovering a shape on layer B, layer A needs the
         // force-redraw for pressed_style.
         let active_id = state
-            .pressed_shape
+            .pressed_element
             .as_deref()
-            .or(state.hovered_shape.as_deref());
+            .or(state.hovered_element.as_deref());
         let active_id = active_id?;
-        let shape = self.interactive_shapes.iter().find(|s| s.id == active_id)?;
+        let shape = self.interactive_elements.iter().find(|s| s.id == active_id)?;
         if shape.has_hover_style || shape.has_pressed_style {
             Some(shape.layer.clone())
         } else {
@@ -625,9 +625,9 @@ impl CanvasProgram<'_> {
 
     /// Get the tooltip text for the currently hovered shape, if any.
     fn active_tooltip(&self, state: &CanvasState) -> Option<String> {
-        let hovered_id = state.hovered_shape.as_deref()?;
+        let hovered_id = state.hovered_element.as_deref()?;
         let shape = self
-            .interactive_shapes
+            .interactive_elements
             .iter()
             .find(|s| s.id == hovered_id)?;
         shape.tooltip.clone()
@@ -643,8 +643,8 @@ impl CanvasProgram<'_> {
         state: &CanvasState,
         images: &crate::image_registry::ImageRegistry,
     ) {
-        let hovered = state.hovered_shape.as_deref();
-        let pressed = state.pressed_shape.as_deref();
+        let hovered = state.hovered_element.as_deref();
+        let pressed = state.pressed_element.as_deref();
         let mut i = 0;
         while i < shapes.len() {
             let shape = shapes[i];
@@ -713,16 +713,16 @@ impl CanvasProgram<'_> {
                     i += 1;
                 }
                 _ => {
-                    let shape_id = shape
+                    let element_id = shape
                         .get("interactive")
                         .and_then(|v| v.get("id"))
                         .and_then(|v| v.as_str());
 
                     let needs_override =
-                        shape_id.is_some_and(|sid| pressed == Some(sid) || hovered == Some(sid));
+                        element_id.is_some_and(|sid| pressed == Some(sid) || hovered == Some(sid));
 
                     if needs_override {
-                        let sid = shape_id.unwrap();
+                        let sid = element_id.unwrap();
                         let interactive = shape.get("interactive").unwrap();
                         // Pressed style takes priority over hover style.
                         let override_style = if pressed == Some(sid) {
@@ -1483,22 +1483,22 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 let mut action: Option<iced::widget::Action<Message>> = None;
                 if let Some(drag) = state.dragging.take() {
                     let pos = state.cursor_position.unwrap_or(Point::ORIGIN);
-                    let msg = Message::CanvasShapeDragEnd {
+                    let msg = Message::CanvasElementDragEnd {
                         canvas_id: self.id.clone(),
-                        shape_id: drag.shape_id,
+                        element_id: drag.element_id,
                         x: pos.x,
                         y: pos.y,
                     };
                     action = Some(iced::widget::Action::publish(msg));
                 }
-                if let Some(hovered_id) = state.hovered_shape.take() {
-                    let msg = Message::CanvasShapeLeave {
+                if let Some(hovered_id) = state.hovered_element.take() {
+                    let msg = Message::CanvasElementLeave {
                         canvas_id: self.id.clone(),
-                        shape_id: hovered_id,
+                        element_id: hovered_id,
                     };
                     action = Some(pick_action(action, iced::widget::Action::publish(msg)));
                 }
-                state.pressed_shape = None;
+                state.pressed_element = None;
                 state.cursor_position = None;
                 return action;
             }
@@ -1511,9 +1511,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 // -- Drag tracking --
                 if let Some(ref mut drag) = state.dragging {
                     let shape = self
-                        .interactive_shapes
+                        .interactive_elements
                         .iter()
-                        .find(|s| s.id == drag.shape_id);
+                        .find(|s| s.id == drag.element_id);
 
                     // Start from raw cursor position, apply bounds
                     // clamping first, then axis constraints. This
@@ -1538,9 +1538,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     // Track the effective (clamped) position so deltas
                     // are consistent across frames.
                     drag.last = effective;
-                    let msg = Message::CanvasShapeDrag {
+                    let msg = Message::CanvasElementDrag {
                         canvas_id: self.id.clone(),
-                        shape_id: drag.shape_id.clone(),
+                        element_id: drag.element_id.clone(),
                         x: effective.x,
                         y: effective.y,
                         delta_x: dx,
@@ -1551,9 +1551,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
                 // -- Hover tracking (skip during active drag) --
                 if state.dragging.is_none() {
-                    let hit = find_hit_shape(position, self.interactive_shapes);
+                    let hit = find_hit_element(position, self.interactive_elements);
                     let new_hovered = hit.map(|s| s.id.clone());
-                    let old_hovered = state.hovered_shape.take();
+                    let old_hovered = state.hovered_element.take();
 
                     if new_hovered != old_hovered {
                         // Enter is emitted AFTER leave so that pick_action
@@ -1562,16 +1562,16 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         // different shape. Losing Enter is worse than losing
                         // Leave -- Enter tells the host WHAT is hovered.
                         if let Some(ref old_id) = old_hovered {
-                            let msg = Message::CanvasShapeLeave {
+                            let msg = Message::CanvasElementLeave {
                                 canvas_id: self.id.clone(),
-                                shape_id: old_id.clone(),
+                                element_id: old_id.clone(),
                             };
                             action = Some(pick_action(action, iced::widget::Action::publish(msg)));
                         }
                         if let Some(ref new_id) = new_hovered {
-                            let msg = Message::CanvasShapeEnter {
+                            let msg = Message::CanvasElementEnter {
                                 canvas_id: self.id.clone(),
-                                shape_id: new_id.clone(),
+                                element_id: new_id.clone(),
                                 x: position.x,
                                 y: position.y,
                             };
@@ -1580,7 +1580,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             action = Some(iced::widget::Action::publish(msg));
                         }
                     }
-                    state.hovered_shape = new_hovered;
+                    state.hovered_element = new_hovered;
                 }
 
                 // -- Raw canvas move event --
@@ -1608,15 +1608,15 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 // If it's only clickable, we track pressed state for
                 // click detection on release.
                 if matches!(button, mouse::Button::Left)
-                    && let Some(shape) = find_hit_shape(position, self.interactive_shapes)
+                    && let Some(shape) = find_hit_element(position, self.interactive_elements)
                 {
                     if shape.draggable {
                         state.dragging = Some(DragState {
-                            shape_id: shape.id.clone(),
+                            element_id: shape.id.clone(),
                             last: position,
                         });
                     } else if shape.on_click {
-                        state.pressed_shape = Some(shape.id.clone());
+                        state.pressed_element = Some(shape.id.clone());
                     }
                 }
 
@@ -1642,9 +1642,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 if matches!(button, mouse::Button::Left) {
                     // -- Drag end --
                     if let Some(drag) = state.dragging.take() {
-                        let msg = Message::CanvasShapeDragEnd {
+                        let msg = Message::CanvasElementDragEnd {
                             canvas_id: self.id.clone(),
-                            shape_id: drag.shape_id,
+                            element_id: drag.element_id,
                             x: position.x,
                             y: position.y,
                         };
@@ -1652,16 +1652,16 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     }
 
                     // -- Click detection: pressed shape == current hover --
-                    if let Some(pressed_id) = state.pressed_shape.take() {
+                    if let Some(pressed_id) = state.pressed_element.take() {
                         let still_over = state
-                            .hovered_shape
+                            .hovered_element
                             .as_ref()
                             .map(|h| h == &pressed_id)
                             .unwrap_or(false);
                         if still_over {
-                            let msg = Message::CanvasShapeClick {
+                            let msg = Message::CanvasElementClick {
                                 canvas_id: self.id.clone(),
-                                shape_id: pressed_id,
+                                element_id: pressed_id,
                                 x: position.x,
                                 y: position.y,
                                 button: btn_str.clone(),
@@ -1701,10 +1701,10 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             }
 
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-                if !self.interactive_shapes.is_empty() =>
+                if !self.interactive_elements.is_empty() =>
             {
                 use keyboard::key::Named;
-                let count = self.interactive_shapes.len();
+                let count = self.interactive_elements.len();
                 // Validate focused_index against current shape count
                 // (shapes may have changed between renders).
                 if state.focused_index.is_some_and(|idx| idx >= count) {
@@ -1715,11 +1715,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         match state.focused_index {
                             None => {
                                 state.focused_index = Some(0);
-                                let shape_id = self.interactive_shapes[0].id.clone();
+                                let element_id = self.interactive_elements[0].id.clone();
                                 Some(
-                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                    iced::widget::Action::publish(Message::CanvasElementFocused {
                                         canvas_id: self.id.clone(),
-                                        shape_id,
+                                        element_id,
                                     })
                                     .and_capture(),
                                 )
@@ -1727,11 +1727,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             Some(idx) if idx + 1 < count => {
                                 let next = idx + 1;
                                 state.focused_index = Some(next);
-                                let shape_id = self.interactive_shapes[next].id.clone();
+                                let element_id = self.interactive_elements[next].id.clone();
                                 Some(
-                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                    iced::widget::Action::publish(Message::CanvasElementFocused {
                                         canvas_id: self.id.clone(),
-                                        shape_id,
+                                        element_id,
                                     })
                                     .and_capture(),
                                 )
@@ -1749,11 +1749,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                                 // Focus last element.
                                 let last = count - 1;
                                 state.focused_index = Some(last);
-                                let shape_id = self.interactive_shapes[last].id.clone();
+                                let element_id = self.interactive_elements[last].id.clone();
                                 Some(
-                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                    iced::widget::Action::publish(Message::CanvasElementFocused {
                                         canvas_id: self.id.clone(),
-                                        shape_id,
+                                        element_id,
                                     })
                                     .and_capture(),
                                 )
@@ -1766,11 +1766,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             Some(idx) => {
                                 let prev = idx - 1;
                                 state.focused_index = Some(prev);
-                                let shape_id = self.interactive_shapes[prev].id.clone();
+                                let element_id = self.interactive_elements[prev].id.clone();
                                 Some(
-                                    iced::widget::Action::publish(Message::CanvasShapeFocused {
+                                    iced::widget::Action::publish(Message::CanvasElementFocused {
                                         canvas_id: self.id.clone(),
-                                        shape_id,
+                                        element_id,
                                     })
                                     .and_capture(),
                                 )
@@ -1783,11 +1783,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             Some(idx) => (idx + 1) % count,
                         };
                         state.focused_index = Some(next);
-                        let shape_id = self.interactive_shapes[next].id.clone();
+                        let element_id = self.interactive_elements[next].id.clone();
                         Some(
-                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                            iced::widget::Action::publish(Message::CanvasElementFocused {
                                 canvas_id: self.id.clone(),
-                                shape_id,
+                                element_id,
                             })
                             .and_capture(),
                         )
@@ -1799,23 +1799,23 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             Some(idx) => idx - 1,
                         };
                         state.focused_index = Some(prev);
-                        let shape_id = self.interactive_shapes[prev].id.clone();
+                        let element_id = self.interactive_elements[prev].id.clone();
                         Some(
-                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                            iced::widget::Action::publish(Message::CanvasElementFocused {
                                 canvas_id: self.id.clone(),
-                                shape_id,
+                                element_id,
                             })
                             .and_capture(),
                         )
                     }
                     keyboard::Key::Named(Named::Enter | Named::Space) => {
                         if let Some(idx) = state.focused_index {
-                            let shape = &self.interactive_shapes[idx];
+                            let shape = &self.interactive_elements[idx];
                             if shape.on_click {
                                 let center = hit_region_center(&shape.hit_region);
-                                let msg = Message::CanvasShapeClick {
+                                let msg = Message::CanvasElementClick {
                                     canvas_id: self.id.clone(),
-                                    shape_id: shape.id.clone(),
+                                    element_id: shape.id.clone(),
                                     x: center.x,
                                     y: center.y,
                                     button: "keyboard".to_string(),
@@ -1848,11 +1848,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     }
                     keyboard::Key::Named(Named::Home) => {
                         state.focused_index = Some(0);
-                        let shape_id = self.interactive_shapes[0].id.clone();
+                        let element_id = self.interactive_elements[0].id.clone();
                         Some(
-                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                            iced::widget::Action::publish(Message::CanvasElementFocused {
                                 canvas_id: self.id.clone(),
-                                shape_id,
+                                element_id,
                             })
                             .and_capture(),
                         )
@@ -1860,11 +1860,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     keyboard::Key::Named(Named::End) => {
                         let last = count - 1;
                         state.focused_index = Some(last);
-                        let shape_id = self.interactive_shapes[last].id.clone();
+                        let element_id = self.interactive_elements[last].id.clone();
                         Some(
-                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                            iced::widget::Action::publish(Message::CanvasElementFocused {
                                 canvas_id: self.id.clone(),
-                                shape_id,
+                                element_id,
                             })
                             .and_capture(),
                         )
@@ -1874,11 +1874,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         let idx = state.focused_index.unwrap_or(0);
                         let new_idx = (idx + page_size).min(count - 1);
                         state.focused_index = Some(new_idx);
-                        let shape_id = self.interactive_shapes[new_idx].id.clone();
+                        let element_id = self.interactive_elements[new_idx].id.clone();
                         Some(
-                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                            iced::widget::Action::publish(Message::CanvasElementFocused {
                                 canvas_id: self.id.clone(),
-                                shape_id,
+                                element_id,
                             })
                             .and_capture(),
                         )
@@ -1888,11 +1888,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         let idx = state.focused_index.unwrap_or(0);
                         let new_idx = idx.saturating_sub(page_size);
                         state.focused_index = Some(new_idx);
-                        let shape_id = self.interactive_shapes[new_idx].id.clone();
+                        let element_id = self.interactive_elements[new_idx].id.clone();
                         Some(
-                            iced::widget::Action::publish(Message::CanvasShapeFocused {
+                            iced::widget::Action::publish(Message::CanvasElementFocused {
                                 canvas_id: self.id.clone(),
-                                shape_id,
+                                element_id,
                             })
                             .and_capture(),
                         )
@@ -1965,9 +1965,9 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
         // Focus ring overlay (uncached, drawn on top of everything).
         if let Some(idx) = state.focused_index
-            && idx < self.interactive_shapes.len()
+            && idx < self.interactive_elements.len()
         {
-            let shape = &self.interactive_shapes[idx];
+            let shape = &self.interactive_elements[idx];
             let rect = hit_region_to_rect(&shape.hit_region);
             let mut frame = canvas::Frame::new(renderer, bounds.size());
             let ring_path = canvas::Path::rounded_rectangle(
@@ -1999,13 +1999,13 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             return mouse::Interaction::Grabbing;
         }
         // Per-shape cursor.
-        if let Some(ref hovered_id) = state.hovered_shape
-            && let Some(shape) = self.interactive_shapes.iter().find(|s| &s.id == hovered_id)
+        if let Some(ref hovered_id) = state.hovered_element
+            && let Some(shape) = self.interactive_elements.iter().find(|s| &s.id == hovered_id)
         {
             if let Some(ref cursor_name) = shape.cursor {
                 return parse_cursor_interaction(cursor_name);
             }
-            // Default cursor for interactive shapes without explicit cursor.
+            // Default cursor for interactive elements without explicit cursor.
             return mouse::Interaction::Pointer;
         }
         // Fallback to canvas-level cursor.
@@ -2017,7 +2017,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
     }
 
     fn is_focusable(&self, _state: &CanvasState) -> bool {
-        !self.interactive_shapes.is_empty()
+        !self.interactive_elements.is_empty()
     }
 
     fn operate_accessible(
@@ -2027,7 +2027,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         operation: &mut dyn iced::advanced::widget::Operation,
     ) {
         let mut seen_ids = std::collections::HashSet::new();
-        for shape in self.interactive_shapes {
+        for shape in self.interactive_elements {
             let a11y = match &shape.a11y {
                 Some(a) => a,
                 None => continue,
@@ -2127,25 +2127,25 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     // "interactive" is a convenience flag that enables all event handlers.
     let interactive = prop_bool_default(props, "interactive", false);
 
-    let interactive_shapes = ctx
+    let interactive_elements = ctx
         .caches
         .canvas_interactions
         .get(&node.id)
         .map(|v| v.as_slice())
         .unwrap_or(&[]);
-    let has_interactive_shapes = !interactive_shapes.is_empty();
+    let has_interactive_elements = !interactive_elements.is_empty();
 
     let mut c = iced::widget::canvas(CanvasProgram {
         layers,
         caches: node_caches,
         background,
         id: node.id.clone(),
-        on_press: on_press || interactive || has_interactive_shapes,
-        on_release: on_release || interactive || has_interactive_shapes,
-        on_move: on_move || interactive || has_interactive_shapes,
+        on_press: on_press || interactive || has_interactive_elements,
+        on_release: on_release || interactive || has_interactive_elements,
+        on_move: on_move || interactive || has_interactive_elements,
         on_scroll: on_scroll || interactive,
         images: ctx.images,
-        interactive_shapes,
+        interactive_elements,
     })
     .width(width)
     .height(height);
@@ -2178,25 +2178,25 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 // Cache ensure function
 // ---------------------------------------------------------------------------
 
-/// Recursively collect interactive shapes from a shape array, descending
+/// Recursively collect interactive elements from a shape array, descending
 /// into groups. `offset_x`/`offset_y` accumulate group x/y translations
 /// so nested shapes' hit regions are in canvas-space coordinates.
-fn collect_interactive_shapes(
+fn collect_interactive_elements(
     shapes: &[Value],
     layer_name: &str,
     offset_x: f32,
     offset_y: f32,
-    out: &mut Vec<InteractiveShape>,
+    out: &mut Vec<InteractiveElement>,
 ) {
     for shape in shapes {
-        if let Some(mut ishape) = parse_interactive_shape(shape, layer_name) {
+        if let Some(mut ishape) = parse_interactive_element(shape, layer_name) {
             // Apply accumulated group offset to the hit region.
             if offset_x != 0.0 || offset_y != 0.0 {
                 ishape.hit_region = offset_hit_region(&ishape.hit_region, offset_x, offset_y);
             }
             out.push(ishape);
         }
-        // Recurse into group children to find nested interactive shapes.
+        // Recurse into group children to find nested interactive elements.
         let is_group = shape
             .get("type")
             .and_then(|v| v.as_str())
@@ -2204,7 +2204,7 @@ fn collect_interactive_shapes(
         if is_group && let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
             let gx = json_f32(shape, "x");
             let gy = json_f32(shape, "y");
-            collect_interactive_shapes(children, layer_name, offset_x + gx, offset_y + gy, out);
+            collect_interactive_elements(children, layer_name, offset_x + gx, offset_y + gy, out);
         }
     }
 }
@@ -2245,16 +2245,16 @@ pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut
     let layer_map = canvas_layer_map(props);
     let node_caches = caches.canvas_caches.entry(node.id.clone()).or_default();
 
-    // Parse interactive shapes from all layers, recursing into groups.
-    let mut interactive_shapes = Vec::new();
+    // Parse interactive elements from all layers, recursing into groups.
+    let mut interactive_elements = Vec::new();
     for (layer_name, shapes_val) in &layer_map {
         if let Some(shapes_arr) = shapes_val.as_array() {
-            collect_interactive_shapes(shapes_arr, layer_name, 0.0, 0.0, &mut interactive_shapes);
+            collect_interactive_elements(shapes_arr, layer_name, 0.0, 0.0, &mut interactive_elements);
         }
     }
     caches
         .canvas_interactions
-        .insert(node.id.clone(), interactive_shapes);
+        .insert(node.id.clone(), interactive_elements);
 
     // Update or create caches for each layer.
     for (layer_name, shapes_val) in &layer_map {
@@ -2689,7 +2689,7 @@ mod tests {
                 "tooltip": "Bar 1: 200 units"
             }
         });
-        let result = parse_interactive_shape(&shape, "default").unwrap();
+        let result = parse_interactive_element(&shape, "default").unwrap();
         assert_eq!(result.id, "bar-1");
         assert!(result.on_click);
         assert!(result.on_hover);
@@ -2718,7 +2718,7 @@ mod tests {
                 "drag_axis": "x"
             }
         });
-        let result = parse_interactive_shape(&shape, "layer1").unwrap();
+        let result = parse_interactive_element(&shape, "layer1").unwrap();
         assert_eq!(result.id, "dot-1");
         assert!(result.draggable);
         assert_eq!(result.drag_axis, DragAxis::X);
@@ -2736,7 +2736,7 @@ mod tests {
                 "hit_rect": {"x": 0, "y": 0, "w": 100, "h": 100}
             }
         });
-        let result = parse_interactive_shape(&shape, "default").unwrap();
+        let result = parse_interactive_element(&shape, "default").unwrap();
         assert_eq!(result.id, "path-1");
         assert!(matches!(result.hit_region, HitRegion::Rect { .. }));
     }
@@ -2747,13 +2747,13 @@ mod tests {
             "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10,
             "interactive": {"on_click": true}
         });
-        assert!(parse_interactive_shape(&shape, "default").is_none());
+        assert!(parse_interactive_element(&shape, "default").is_none());
     }
 
     #[test]
     fn parse_interactive_no_field_returns_none() {
         let shape = json!({"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10});
-        assert!(parse_interactive_shape(&shape, "default").is_none());
+        assert!(parse_interactive_element(&shape, "default").is_none());
     }
 
     // -- Hit region to rect --
@@ -2866,7 +2866,7 @@ mod tests {
                 {"type": "text", "x": 30, "y": 25, "content": "Save", "fill": "#ccc"}
             ]
         });
-        let result = parse_interactive_shape(&shape, "default").unwrap();
+        let result = parse_interactive_element(&shape, "default").unwrap();
         assert_eq!(result.id, "btn");
         assert!(result.on_click);
         assert!(result.on_hover);
@@ -2887,7 +2887,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_interactive_shapes_recurses_into_groups() {
+    fn collect_interactive_elements_recurses_into_groups() {
         let shapes = vec![
             json!({
                 "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10,
@@ -2909,7 +2909,7 @@ mod tests {
             }),
         ];
         let mut result = Vec::new();
-        collect_interactive_shapes(&shapes, "default", 0.0, 0.0, &mut result);
+        collect_interactive_elements(&shapes, "default", 0.0, 0.0, &mut result);
         let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
         assert!(ids.contains(&"top-rect"));
         assert!(ids.contains(&"grp"));

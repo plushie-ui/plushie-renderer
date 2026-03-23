@@ -587,48 +587,48 @@ impl OutgoingEvent {
     }
 
     // -----------------------------------------------------------------------
-    // Canvas shape events (interactive shapes)
+    // Canvas element events (interactive group interactions)
     // -----------------------------------------------------------------------
 
-    pub fn canvas_shape_enter(canvas_id: String, shape_id: String, x: f32, y: f32) -> Self {
+    pub fn canvas_element_enter(canvas_id: String, element_id: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "shape_id": shape_id,
+                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
             })),
-            ..Self::bare("canvas_shape_enter", canvas_id)
+            ..Self::bare("canvas_element_enter", canvas_id)
         }
     }
 
-    pub fn canvas_shape_leave(canvas_id: String, shape_id: String) -> Self {
+    pub fn canvas_element_leave(canvas_id: String, element_id: String) -> Self {
         Self {
-            data: Some(serde_json::json!({"shape_id": shape_id})),
-            ..Self::bare("canvas_shape_leave", canvas_id)
+            data: Some(serde_json::json!({"element_id": element_id})),
+            ..Self::bare("canvas_element_leave", canvas_id)
         }
     }
 
-    pub fn canvas_shape_click(
+    pub fn canvas_element_click(
         canvas_id: String,
-        shape_id: String,
+        element_id: String,
         x: f32,
         y: f32,
         button: String,
     ) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "shape_id": shape_id,
+                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
                 "button": button,
             })),
-            ..Self::bare("canvas_shape_click", canvas_id)
+            ..Self::bare("canvas_element_click", canvas_id)
         }
     }
 
-    pub fn canvas_shape_drag(
+    pub fn canvas_element_drag(
         canvas_id: String,
-        shape_id: String,
+        element_id: String,
         x: f32,
         y: f32,
         dx: f32,
@@ -636,32 +636,89 @@ impl OutgoingEvent {
     ) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "shape_id": shape_id,
+                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
                 "delta_x": sanitize_f32(dx),
                 "delta_y": sanitize_f32(dy),
             })),
             coalesce: Some(CoalesceHint::Replace),
-            ..Self::bare("canvas_shape_drag", canvas_id)
+            ..Self::bare("canvas_element_drag", canvas_id)
         }
     }
 
-    pub fn canvas_shape_drag_end(canvas_id: String, shape_id: String, x: f32, y: f32) -> Self {
+    pub fn canvas_element_drag_end(canvas_id: String, element_id: String, x: f32, y: f32) -> Self {
         Self {
             data: Some(serde_json::json!({
-                "shape_id": shape_id,
+                "element_id": element_id,
                 "x": sanitize_f32(x),
                 "y": sanitize_f32(y),
             })),
-            ..Self::bare("canvas_shape_drag_end", canvas_id)
+            ..Self::bare("canvas_element_drag_end", canvas_id)
         }
     }
 
-    pub fn canvas_shape_focused(canvas_id: String, shape_id: String) -> Self {
+    pub fn canvas_element_focused(canvas_id: String, element_id: String) -> Self {
         Self {
-            data: Some(serde_json::json!({"shape_id": shape_id})),
-            ..Self::bare("canvas_shape_focused", canvas_id)
+            data: Some(serde_json::json!({"element_id": element_id})),
+            ..Self::bare("canvas_element_focused", canvas_id)
+        }
+    }
+
+    /// An interactive element lost keyboard focus.
+    pub fn canvas_element_blurred(canvas_id: String, element_id: String) -> Self {
+        Self {
+            data: Some(serde_json::json!({"element_id": element_id})),
+            ..Self::bare("canvas_element_blurred", canvas_id)
+        }
+    }
+
+    /// The canvas widget itself gained iced-level focus.
+    pub fn canvas_focused(canvas_id: String) -> Self {
+        Self::bare("canvas_focused", canvas_id)
+    }
+
+    /// The canvas widget itself lost iced-level focus.
+    pub fn canvas_blurred(canvas_id: String) -> Self {
+        Self::bare("canvas_blurred", canvas_id)
+    }
+
+    /// A focusable group gained group-level focus (two-level navigation).
+    pub fn canvas_group_focused(canvas_id: String, group_id: String) -> Self {
+        Self {
+            data: Some(serde_json::json!({"group_id": group_id})),
+            ..Self::bare("canvas_group_focused", canvas_id)
+        }
+    }
+
+    /// A focusable group lost group-level focus.
+    pub fn canvas_group_blurred(canvas_id: String, group_id: String) -> Self {
+        Self {
+            data: Some(serde_json::json!({"group_id": group_id})),
+            ..Self::bare("canvas_group_blurred", canvas_id)
+        }
+    }
+
+    /// Renderer-side validation diagnostic.
+    ///
+    /// The `id` field on the event envelope is set to `canvas_id` for
+    /// consistency with other canvas events. The `data` payload carries
+    /// the full diagnostic detail including the optional `element_id`.
+    pub fn diagnostic(
+        canvas_id: String,
+        element_id: Option<String>,
+        level: &str,
+        code: &str,
+        message: &str,
+    ) -> Self {
+        Self {
+            data: Some(serde_json::json!({
+                "level": level,
+                "element_id": element_id,
+                "code": code,
+                "message": message,
+            })),
+            ..Self::bare("diagnostic", canvas_id)
         }
     }
 

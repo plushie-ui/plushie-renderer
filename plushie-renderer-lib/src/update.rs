@@ -40,12 +40,18 @@ impl App {
             | Message::MouseAreaScroll(..)
             | Message::CanvasEvent { .. }
             | Message::CanvasScroll { .. }
-            | Message::CanvasShapeEnter { .. }
-            | Message::CanvasShapeLeave { .. }
-            | Message::CanvasShapeClick { .. }
-            | Message::CanvasShapeDrag { .. }
-            | Message::CanvasShapeDragEnd { .. }
-            | Message::CanvasShapeFocused { .. }
+            | Message::CanvasElementEnter { .. }
+            | Message::CanvasElementLeave { .. }
+            | Message::CanvasElementClick { .. }
+            | Message::CanvasElementDrag { .. }
+            | Message::CanvasElementDragEnd { .. }
+            | Message::CanvasElementFocused { .. }
+            | Message::CanvasElementBlurred { .. }
+            | Message::CanvasFocused { .. }
+            | Message::CanvasBlurred { .. }
+            | Message::CanvasGroupFocused { .. }
+            | Message::CanvasGroupBlurred { .. }
+            | Message::Diagnostic { .. }
             | Message::Slide(..)
             | Message::SlideRelease(..)
             | Message::TextEditorAction(..)
