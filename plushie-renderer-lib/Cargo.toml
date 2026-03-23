@@ -19,7 +19,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-plushie-ext = { version = "0.4.1", path = "../plushie-ext" }
+plushie-ext = { version = "0.5.0", path = "../plushie-ext" }
 iced = { version = "0.8", package = "plushie-iced", features = ["advanced", "canvas", "a11y"] }
 serde = "1"
 serde_json = "1"

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-23
+
 ### Breaking changes
 
 - **Canvas group redesign.** Interactive elements are now groups with
@@ -67,6 +69,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   that match iced palette names (`"primary"`, `"text"`, `"background"`,
   `"success"`, `"danger"`, `"warning"`) are resolved against the current
   theme at draw time. Canvas shapes now participate in the theme system.
+- **Focus-visible pattern.** Focus ring and focus_style only show for
+  keyboard navigation (Tab), not mouse clicks. Matches iced's built-in
+  button behavior.
+- **Custom focus ring radius.** New `focus_ring_radius` field on groups
+  for shape-matched focus rings (e.g. pill-shaped toggles).
 
 ### Fixed
 

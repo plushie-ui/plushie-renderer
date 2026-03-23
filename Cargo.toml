@@ -3,7 +3,7 @@ members = ["plushie-ext", "plushie-renderer-lib", "plushie-renderer", "plushie-r
 resolver = "2"
 
 [workspace.package]
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
