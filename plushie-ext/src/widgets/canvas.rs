@@ -1115,37 +1115,33 @@ impl CanvasProgram<'_> {
                         apply_group_transforms(frame, shape);
                     }
 
+                    // Resolve the active style override from the GROUP (not children).
+                    // Priority: pressed > hover > focus.
+                    let group_override: Option<&Value> = if is_pressed {
+                        shape.get("pressed_style")
+                    } else {
+                        None
+                    }
+                    .or_else(|| if is_hovered { shape.get("hover_style") } else { None })
+                    .or_else(|| if is_focused { shape.get("focus_style") } else { None });
+
                     let draw_children = |f: &mut canvas::Frame, child_refs: &[&Value], img: &crate::image_registry::ImageRegistry| {
-                        if group_active {
+                        if let Some(overrides) = group_override {
                             for &child in child_refs {
-                                // Per-child style overrides.
-                                // Priority: pressed > hover > focus.
-                                let override_style = if is_pressed {
+                                // Apply group-level style override to each child.
+                                // Children can also have their own per-child overrides
+                                // which take precedence (merged on top).
+                                let child_override = if is_pressed {
                                     child.get("pressed_style")
                                 } else {
                                     None
                                 }
-                                .or_else(|| {
-                                    if is_hovered {
-                                        child.get("hover_style")
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .or_else(|| {
-                                    if is_focused {
-                                        child.get("focus_style")
-                                    } else {
-                                        None
-                                    }
-                                });
+                                .or_else(|| if is_hovered { child.get("hover_style") } else { None })
+                                .or_else(|| if is_focused { child.get("focus_style") } else { None });
 
-                                if let Some(overrides) = override_style {
-                                    let merged = merge_shape_style(child, overrides);
-                                    draw_canvas_shape(f, &merged, img);
-                                } else {
-                                    draw_canvas_shape(f, child, img);
-                                }
+                                let effective = child_override.unwrap_or(overrides);
+                                let merged = merge_shape_style(child, effective);
+                                draw_canvas_shape(f, &merged, img);
                             }
                         } else {
                             draw_canvas_shapes(f, child_refs, img);
