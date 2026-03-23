@@ -675,8 +675,9 @@ fn draw_with_group_clip(
     frame: &mut canvas::Frame,
     group: &Value,
     images: &crate::image_registry::ImageRegistry,
+    theme: &iced::Theme,
     children: &[&Value],
-    draw_fn: impl FnOnce(&mut canvas::Frame, &[&Value], &crate::image_registry::ImageRegistry),
+    draw_fn: impl FnOnce(&mut canvas::Frame, &[&Value], &crate::image_registry::ImageRegistry, &iced::Theme),
 ) {
     if let Some(clip) = group.get("clip").and_then(|v| v.as_object()) {
         let x = clip.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
@@ -685,10 +686,10 @@ fn draw_with_group_clip(
         let h = clip.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let clip_rect = iced::Rectangle { x, y, width: w, height: h };
         frame.with_clip(clip_rect, |f| {
-            draw_fn(f, children, images);
+            draw_fn(f, children, images, theme);
         });
     } else {
-        draw_fn(frame, children, images);
+        draw_fn(frame, children, images, theme);
     }
 }
 
@@ -925,6 +926,11 @@ struct CanvasState {
     /// Tracks the last consumed pending_focus to prevent re-firing.
     /// See pending_focus consumption in update().
     last_consumed_pending: Option<String>,
+    /// Whether the canvas currently has iced-level focus. Set by
+    /// `on_focus_gained`, cleared by `on_focus_lost`. Used to suppress
+    /// focus visuals (focus_style, focus ring) when the canvas is
+    /// unfocused but `focused_id` is preserved for re-entry.
+    canvas_focused: bool,
 }
 
 struct CanvasProgram<'a> {
@@ -980,7 +986,8 @@ impl CanvasProgram<'_> {
             }
         }
 
-        // Keyboard focus with focus_style.
+        // Keyboard focus with focus_style (only when canvas has iced focus).
+        if state.canvas_focused {
         if let Some(ref focused_id) = state.focused_id {
             if let Some(shape) = self
                 .interactive_elements
@@ -991,6 +998,7 @@ impl CanvasProgram<'_> {
                     layers.push(shape.layer.clone());
                 }
             }
+        }
         }
 
         layers
@@ -1095,10 +1103,16 @@ impl CanvasProgram<'_> {
         shapes: &[&Value],
         state: &CanvasState,
         images: &crate::image_registry::ImageRegistry,
+        theme: &iced::Theme,
     ) {
         let hovered = state.hovered_element.as_deref();
         let pressed = state.pressed_element.as_deref();
-        let focused = state.focused_id.as_deref();
+        // Only apply focus_style when the canvas has iced-level focus.
+        let focused = if state.canvas_focused {
+            state.focused_id.as_deref()
+        } else {
+            None
+        };
 
         for &shape in shapes {
             let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -1130,7 +1144,7 @@ impl CanvasProgram<'_> {
                     .or_else(|| if is_hovered { shape.get("hover_style") } else { None })
                     .or_else(|| if is_focused { shape.get("focus_style") } else { None });
 
-                    let draw_children = |f: &mut canvas::Frame, child_refs: &[&Value], img: &crate::image_registry::ImageRegistry| {
+                    let draw_children = |f: &mut canvas::Frame, child_refs: &[&Value], img: &crate::image_registry::ImageRegistry, theme: &iced::Theme| {
                         if let Some(overrides) = group_override {
                             for &child in child_refs {
                                 // Apply group-level style override to each child.
@@ -1146,15 +1160,15 @@ impl CanvasProgram<'_> {
 
                                 let effective = child_override.unwrap_or(overrides);
                                 let merged = merge_shape_style(child, effective);
-                                draw_canvas_shape(f, &merged, img);
+                                draw_canvas_shape(f, &merged, img, theme);
                             }
                         } else {
-                            draw_canvas_shapes(f, child_refs, img);
+                            draw_canvas_shapes(f, child_refs, img, theme);
                         }
                     };
 
                     let child_refs: Vec<&Value> = children.iter().collect();
-                    draw_with_group_clip(frame, shape, images, &child_refs, draw_children);
+                    draw_with_group_clip(frame, shape, images, theme, &child_refs, draw_children);
 
                     if has_transforms {
                         frame.pop_transform();
@@ -1163,7 +1177,7 @@ impl CanvasProgram<'_> {
             } else {
                 // Non-group shapes are never interactive elements in the
                 // new design. Draw them directly.
-                draw_canvas_shape(frame, shape, images);
+                draw_canvas_shape(frame, shape, images, theme);
             }
         }
     }
@@ -1567,11 +1581,29 @@ fn parse_fill_rule(value: Option<&Value>) -> canvas::fill::Rule {
 /// Parse a canvas fill value. If string, hex color. If gradient object,
 /// build a gradient::Linear. Falls back to white. The `shape` parameter
 /// provides the parent shape object for reading the `fill_rule` key.
+#[allow(dead_code)] // used by tests
 pub(crate) fn parse_canvas_fill(value: &Value, shape: &Value) -> canvas::Fill {
+    parse_canvas_fill_themed(value, shape, None)
+}
+
+/// Parse a canvas fill with optional theme-aware color resolution.
+///
+/// When `theme` is `Some`, color strings that match palette names
+/// (`"primary"`, `"text"`, `"background"`, `"success"`, `"danger"`,
+/// `"warning"`) are resolved against the theme instead of being
+/// treated as hex strings.
+fn parse_canvas_fill_themed(
+    value: &Value,
+    shape: &Value,
+    theme: Option<&iced::Theme>,
+) -> canvas::Fill {
     let rule = parse_fill_rule(shape.get("fill_rule"));
     match value {
-        Value::String(s) => {
-            let color = parse_hex_color(s).unwrap_or(Color::WHITE);
+        Value::String(_) => {
+            let color = theme
+                .and_then(|t| resolve_color(value, t))
+                .or_else(|| parse_color(value))
+                .unwrap_or(Color::WHITE);
             canvas::Fill {
                 style: canvas::Style::Solid(color),
                 rule,
@@ -1618,7 +1650,11 @@ pub(crate) fn parse_canvas_fill(value: &Value, shape: &Value) -> canvas::Fill {
                             let offset = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                             let color = arr
                                 .get(1)
-                                .and_then(parse_color)
+                                .and_then(|v| {
+                                    theme
+                                        .and_then(|t| resolve_color(v, t))
+                                        .or_else(|| parse_color(v))
+                                })
                                 .unwrap_or(Color::TRANSPARENT);
                             linear = linear.add_stop(offset, color);
                         }
@@ -1656,14 +1692,23 @@ pub(crate) fn parse_canvas_fill(value: &Value, shape: &Value) -> canvas::Fill {
 }
 
 /// Parse a canvas stroke from a JSON object.
+#[allow(dead_code)] // used by tests
 pub(crate) fn parse_canvas_stroke(value: &Value) -> canvas::Stroke<'static> {
+    parse_canvas_stroke_themed(value, None)
+}
+
+/// Parse a canvas stroke with optional theme-aware color resolution.
+fn parse_canvas_stroke_themed(
+    value: &Value,
+    theme: Option<&iced::Theme>,
+) -> canvas::Stroke<'static> {
     let obj = match value.as_object() {
         Some(o) => o,
         None => return canvas::Stroke::default(),
     };
-    let color = obj
-        .get("color")
-        .and_then(parse_color)
+    let color = theme
+        .and_then(|t| obj.get("color").and_then(|v| resolve_color(v, t)))
+        .or_else(|| obj.get("color").and_then(parse_color))
         .unwrap_or(Color::WHITE);
     let width = obj
         .get("width")
@@ -1828,6 +1873,7 @@ fn draw_canvas_shapes(
     frame: &mut canvas::Frame,
     shapes: &[&Value],
     images: &crate::image_registry::ImageRegistry,
+    theme: &iced::Theme,
 ) {
     for &shape in shapes {
         let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -1839,7 +1885,7 @@ fn draw_canvas_shapes(
                      Use group clip instead."
                 );
             }
-            _ => draw_canvas_shape(frame, shape, images),
+            _ => draw_canvas_shape(frame, shape, images, theme),
         }
     }
 }
@@ -1904,6 +1950,7 @@ fn draw_canvas_shape(
     frame: &mut canvas::Frame,
     shape: &Value,
     images: &crate::image_registry::ImageRegistry,
+    theme: &iced::Theme,
 ) {
     let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match shape_type {
@@ -1931,7 +1978,7 @@ fn draw_canvas_shape(
                 canvas::Path::rectangle(Point::new(x, y), Size::new(w, h))
             };
             if let Some(fill_val) = shape.get("fill") {
-                let fill = apply_opacity_to_fill(shape, parse_canvas_fill(fill_val, shape));
+                let fill = apply_opacity_to_fill(shape, parse_canvas_fill_themed(fill_val, shape, Some(theme)));
                 frame.fill(&rect_path, fill);
             } else if shape.get("stroke").is_none() {
                 // Legacy fallback: no fill or stroke key means solid white fill
@@ -1939,7 +1986,7 @@ fn draw_canvas_shape(
                 frame.fill_rectangle(Point::new(x, y), Size::new(w, h), color);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
                 frame.stroke(&rect_path, stroke);
             }
         }
@@ -1949,14 +1996,14 @@ fn draw_canvas_shape(
             let r = json_f32(shape, "r");
             let circle_path = canvas::Path::circle(Point::new(x, y), r);
             if let Some(fill_val) = shape.get("fill") {
-                let fill = apply_opacity_to_fill(shape, parse_canvas_fill(fill_val, shape));
+                let fill = apply_opacity_to_fill(shape, parse_canvas_fill_themed(fill_val, shape, Some(theme)));
                 frame.fill(&circle_path, fill);
             } else if shape.get("stroke").is_none() {
                 let color = apply_opacity_to_color(shape, Color::WHITE);
                 frame.fill(&circle_path, color);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
                 frame.stroke(&circle_path, stroke);
             }
         }
@@ -1967,11 +2014,11 @@ fn draw_canvas_shape(
             let y2 = json_f32(shape, "y2");
             let line_path = canvas::Path::line(Point::new(x1, y1), Point::new(x2, y2));
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
                 frame.stroke(&line_path, stroke);
             } else {
                 // Legacy: use fill color as stroke color
-                let color = apply_opacity_to_color(shape, json_color(shape, "fill"));
+                let color = apply_opacity_to_color(shape, json_color_themed(shape, "fill", theme));
                 let width = shape
                     .get("width")
                     .and_then(|v| v.as_f64())
@@ -1989,7 +2036,7 @@ fn draw_canvas_shape(
             let x = json_f32(shape, "x");
             let y = json_f32(shape, "y");
             let content = shape.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let fill_color = apply_opacity_to_color(shape, json_color(shape, "fill"));
+            let fill_color = apply_opacity_to_color(shape, json_color_themed(shape, "fill", theme));
             let size = shape.get("size").and_then(|v| v.as_f64()).map(|v| v as f32);
             let align_x = parse_canvas_text_align_x(
                 shape
@@ -2025,11 +2072,11 @@ fn draw_canvas_shape(
                 .unwrap_or(&[]);
             let path = build_path_from_commands(commands);
             if let Some(fill_val) = shape.get("fill") {
-                let fill = apply_opacity_to_fill(shape, parse_canvas_fill(fill_val, shape));
+                let fill = apply_opacity_to_fill(shape, parse_canvas_fill_themed(fill_val, shape, Some(theme)));
                 frame.fill(&path, fill);
             }
             if let Some(stroke_val) = shape.get("stroke") {
-                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke(stroke_val));
+                let stroke = apply_opacity_to_stroke(shape, parse_canvas_stroke_themed(stroke_val, Some(theme)));
                 frame.stroke(&path, stroke);
             }
         }
@@ -2114,8 +2161,8 @@ fn draw_canvas_shape(
 
                 // draw_with_group_clip handles the clip field (if present)
                 // using frame.with_clip, which manages its own scope.
-                draw_with_group_clip(frame, shape, images, &child_refs, |f, c, img| {
-                    draw_canvas_shapes(f, c, img);
+                draw_with_group_clip(frame, shape, images, theme, &child_refs, |f, c, img, theme| {
+                    draw_canvas_shapes(f, c, img, theme);
                 });
 
                 if has_transforms {
@@ -2448,11 +2495,11 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             let geom = if !force_redraw {
                 if let Some((_hash, cache)) = self.caches.and_then(|c| c.get(layer_name)) {
                     cache.draw(renderer, bounds.size(), |frame| {
-                        draw_canvas_shapes(frame, &shape_refs, images);
+                        draw_canvas_shapes(frame, &shape_refs, images, theme);
                     })
                 } else {
                     let mut frame = canvas::Frame::new(renderer, bounds.size());
-                    draw_canvas_shapes(&mut frame, &shape_refs, images);
+                    draw_canvas_shapes(&mut frame, &shape_refs, images, theme);
                     frame.into_geometry()
                 }
             } else {
@@ -2462,7 +2509,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     cache.clear();
                 }
                 let mut frame = canvas::Frame::new(renderer, bounds.size());
-                self.draw_shapes_with_overrides(&mut frame, &shape_refs, state, images);
+                self.draw_shapes_with_overrides(&mut frame, &shape_refs, state, images, theme);
                 frame.into_geometry()
             };
             geometries.push(geom);
@@ -2478,8 +2525,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
 
         // Focus ring overlay (uncached, drawn on top of everything).
-        // Shape adapts to the element's hit region (rect/circle/line)
-        // and the full accumulated transform is applied.
+        // Only drawn when the canvas has iced-level focus.
+        if state.canvas_focused {
         if let Some(focused_id) = &state.focused_id {
             if let Some(element) = self.interactive_elements.iter().find(|e| &e.id == focused_id) {
                 if element.show_focus_ring {
@@ -2489,6 +2536,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     geometries.push(frame.into_geometry());
                 }
             }
+        }
         }
 
         geometries
@@ -2530,6 +2578,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         &self,
         state: &mut CanvasState,
     ) -> Vec<iced::widget::Action<Message>> {
+        state.canvas_focused = true;
         let mut actions = vec![iced::widget::Action::publish(Message::CanvasFocused {
             canvas_id: self.id.clone(),
         })];
@@ -2565,6 +2614,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         &self,
         state: &mut CanvasState,
     ) -> Vec<iced::widget::Action<Message>> {
+        state.canvas_focused = false;
         let mut actions = Vec::new();
         // Emit blur for the currently focused element (but DON'T clear
         // focused_id -- preserve position so re-entry via Tab returns
@@ -2817,8 +2867,50 @@ pub(crate) fn json_f32(val: &Value, key: &str) -> f32 {
 
 /// Parse a Color from a JSON "fill" field. Accepts "#rrggbb" hex strings;
 /// defaults to white if missing or unparseable.
+#[allow(dead_code)] // used by tests
 pub(crate) fn json_color(val: &Value, key: &str) -> Color {
     val.get(key).and_then(parse_color).unwrap_or(Color::WHITE)
+}
+
+/// Theme-aware version of [`json_color`]. Resolves palette names against
+/// the theme before falling back to hex parsing.
+fn json_color_themed(val: &Value, key: &str, theme: &iced::Theme) -> Color {
+    val.get(key)
+        .and_then(|v| resolve_color(v, theme))
+        .unwrap_or(Color::WHITE)
+}
+
+/// Resolve a color value that may be a hex string OR a theme palette name.
+///
+/// Theme palette names: `"primary"`, `"text"`, `"background"`, `"success"`,
+/// `"danger"`, `"warning"`. When a canvas shape uses one of these as a fill
+/// or stroke color, the renderer resolves it against the current iced theme
+/// at draw time instead of treating it as a literal hex string.
+///
+/// Returns `None` if the value is neither a valid hex color nor a recognized
+/// theme palette name.
+fn resolve_color(value: &Value, theme: &iced::Theme) -> Option<Color> {
+    let s = value.as_str()?;
+
+    // Try hex first (most common case).
+    if s.starts_with('#') {
+        return parse_color(value);
+    }
+
+    // Theme palette name resolution.
+    let palette = theme.palette();
+    match s {
+        "primary" => Some(palette.primary.base.color),
+        "text" => Some(palette.background.base.text),
+        "background" => Some(palette.background.base.color),
+        "success" => Some(palette.success.base.color),
+        "danger" => Some(palette.danger.base.color),
+        "warning" => Some(palette.warning.base.color),
+        _ => {
+            // Fall back to hex parsing (handles non-# prefixed hex, etc.)
+            parse_color(value)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4178,6 +4270,7 @@ mod tests {
             focused_id: Some("b".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         assert_eq!(program.resolve_focus_index(&state), Some(1));
     }
@@ -4194,6 +4287,7 @@ mod tests {
             focused_id: Some("deleted".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -4210,6 +4304,7 @@ mod tests {
             focused_id: None,
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -4226,6 +4321,7 @@ mod tests {
             focused_id: None,
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -4255,6 +4351,7 @@ mod tests {
             focused_id: Some("a".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -4284,6 +4381,7 @@ mod tests {
             focused_id: Some("a".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let msg = program.set_focus(&mut state, Some(0));
         assert!(msg.is_none());
@@ -4302,6 +4400,7 @@ mod tests {
             focused_id: Some("a".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_some());
@@ -4331,6 +4430,7 @@ mod tests {
             focused_id: None,
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_none());
@@ -4348,6 +4448,7 @@ mod tests {
             focused_id: Some("a".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         // Index 99 is out of bounds -> new_id becomes None -> blur.
         let msg = program.set_focus(&mut state, Some(99));
@@ -4371,6 +4472,7 @@ mod tests {
             focused_id: None,
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4390,6 +4492,7 @@ mod tests {
             focused_id: Some("btn".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: true,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4413,6 +4516,7 @@ mod tests {
             focused_id: Some("focus-btn".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: true,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers.len(), 2);
@@ -4438,6 +4542,7 @@ mod tests {
             focused_id: Some("focus-btn".to_string()),
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: true,
         };
         let layers = program.layers_with_active_interaction(&state);
         // Should not duplicate "ui".
@@ -4456,6 +4561,7 @@ mod tests {
             focused_id: None,
             focused_group: None,
             last_consumed_pending: None,
+            canvas_focused: false,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert!(layers.is_empty());
