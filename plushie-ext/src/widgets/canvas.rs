@@ -2101,11 +2101,26 @@ pub(crate) fn render_canvas<'a>(node: &'a TreeNode, ctx: RenderCtx<'a>) -> Eleme
     .width(width)
     .height(height);
 
+    // Widget ID -- enables Command.focus("canvas-id") targeting.
+    c = c.id(iced::widget::Id::from(node.id.clone()));
+
     if let Some(alt) = prop_str(props, "alt") {
         c = c.alt(alt);
     }
     if let Some(desc) = prop_str(props, "description") {
         c = c.description(desc);
+    }
+
+    // Accessible role: explicit prop, or auto-infer from content.
+    // Default: Group when interactive elements exist, Image otherwise.
+    if let Some(role_str) = prop_str(props, "role") {
+        if let Some(role) = super::a11y::parse_role_str(&role_str) {
+            c = c.role(role);
+        } else {
+            log::warn!("canvas '{}': unknown role '{role_str}'", node.id);
+        }
+    } else if has_interactive_elements {
+        c = c.role(iced::advanced::widget::operation::accessible::Role::Group);
     }
 
     c.into()

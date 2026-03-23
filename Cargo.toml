@@ -37,3 +37,18 @@ unreachable_patterns = "deny"
 # codegen-units = 1    # single codegen unit, better optimization opportunities
 # opt-level = "z"      # optimize for size over speed (UI is GPU-bound, not CPU)
 # strip = true         # remove symbol names from the binary
+
+# Use local plushie-iced checkout for canvas widget changes (click-to-focus,
+# focus lifecycle, widget ID, configurable role/active_descendant).
+[patch.crates-io]
+plushie-iced = { path = "../plushie-iced" }
+plushie-iced-widget = { path = "../plushie-iced/widget" }
+plushie-iced-core = { path = "../plushie-iced/core" }
+plushie-iced-runtime = { path = "../plushie-iced/runtime" }
+plushie-iced-winit = { path = "../plushie-iced/winit" }
+plushie-iced-renderer = { path = "../plushie-iced/renderer" }
+plushie-iced-graphics = { path = "../plushie-iced/graphics" }
+plushie-iced-wgpu = { path = "../plushie-iced/wgpu" }
+plushie-iced-tiny-skia = { path = "../plushie-iced/tiny_skia" }
+plushie-iced-futures = { path = "../plushie-iced/futures" }
+plushie-iced-highlighter = { path = "../plushie-iced/highlighter" }

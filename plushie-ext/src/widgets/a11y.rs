@@ -348,6 +348,13 @@ impl A11yOverrides {
 /// `accessible::Role` enum (in the plushie-iced fork), they must be
 /// manually added here with appropriate string aliases. There is no
 /// compile-time exhaustiveness check since this maps from strings.
+/// Parse a role string into the corresponding [`accessible::Role`] enum value.
+///
+/// Used by the `a11y` prop on all widgets and by the canvas `role` prop.
+pub(crate) fn parse_role_str(s: &str) -> Option<accessible::Role> {
+    parse_role(s)
+}
+
 fn parse_role(s: &str) -> Option<accessible::Role> {
     // One canonical underscore form per role. Semantic aliases (different
     // names for the same concept) are allowed where they map to plushie
