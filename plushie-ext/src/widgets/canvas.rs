@@ -185,6 +185,43 @@ impl TransformMatrix {
         })
     }
 
+    /// Decompose this matrix into translation, rotation, and scale.
+    ///
+    /// Returns `(tx, ty, angle, sx, sy)` where the matrix can be
+    /// reconstructed as `translate(tx, ty) * rotate(angle) * scale(sx, sy)`.
+    ///
+    /// This decomposition is exact for matrices built from translate,
+    /// rotate, and scale operations (no shear). For matrices with shear,
+    /// the result is an approximation.
+    pub fn decompose(&self) -> (f32, f32, f32, f32, f32) {
+        let tx = self.tx;
+        let ty = self.ty;
+        let angle = self.c.atan2(self.a);
+        let sx = (self.a * self.a + self.c * self.c).sqrt();
+        // Use determinant / sx to get sy with correct sign (handles reflection).
+        let det = self.a * self.d - self.b * self.c;
+        let sy = if sx.abs() > 1e-10 { det / sx } else { 0.0 };
+        (tx, ty, angle, sx, sy)
+    }
+
+    /// Apply this matrix's transform to an iced canvas [`Frame`].
+    ///
+    /// Decomposes the matrix into translate + rotate + scale and applies
+    /// them in order. The caller must call `frame.push_transform()` before
+    /// and `frame.pop_transform()` after.
+    ///
+    /// [`Frame`]: iced::widget::canvas::Frame
+    pub fn apply_to_frame(&self, frame: &mut canvas::Frame) {
+        let (tx, ty, angle, sx, sy) = self.decompose();
+        frame.translate(Vector::new(tx, ty));
+        if angle.abs() > 1e-6 {
+            frame.rotate(Radians(angle));
+        }
+        if (sx - 1.0).abs() > 1e-6 || (sy - 1.0).abs() > 1e-6 {
+            frame.scale_nonuniform(Vector::new(sx, sy));
+        }
+    }
+
     /// Build a matrix from a group's `"transforms"` JSON array.
     ///
     /// Applies each transform entry in order: translate, rotate, scale.
@@ -1060,6 +1097,79 @@ fn merge_shape_style(shape: &Value, overrides: &Value) -> Value {
         }
     }
     merged
+}
+
+/// Draw a focus ring around an interactive element.
+///
+/// The ring shape adapts to the element's hit region geometry:
+/// - **Rect**: rounded rectangle inflated by `inflate` on each side
+/// - **Circle**: circle inflated by `inflate`
+/// - **Line**: capsule (stadium) around the line, inflated by `inflate`
+///
+/// The element's accumulated transform is applied to the frame so the
+/// ring matches the element's visual position, including rotation and scale.
+fn draw_focus_ring(
+    frame: &mut canvas::Frame,
+    element: &InteractiveElement,
+    color: Color,
+    stroke_width: f32,
+    inflate: f32,
+) {
+    frame.push_transform();
+    element.transform.apply_to_frame(frame);
+
+    let ring_stroke = canvas::Stroke::default()
+        .with_color(color)
+        .with_width(stroke_width);
+
+    match &element.hit_region {
+        HitRegion::Rect { x, y, w, h } => {
+            let path = canvas::Path::rounded_rectangle(
+                Point::new(x - inflate, y - inflate),
+                Size::new(w + inflate * 2.0, h + inflate * 2.0),
+                iced::border::Radius::from(inflate + 1.0),
+            );
+            frame.stroke(&path, ring_stroke);
+        }
+        HitRegion::Circle { cx, cy, r } => {
+            let path = canvas::Path::circle(Point::new(*cx, *cy), r + inflate);
+            frame.stroke(&path, ring_stroke);
+        }
+        HitRegion::Line {
+            x1, y1, x2, y2, half_width,
+        } => {
+            // Draw a capsule (stadium shape) around the line.
+            // This is a rounded rectangle oriented along the line.
+            let dx = x2 - x1;
+            let dy = y2 - y1;
+            let len = (dx * dx + dy * dy).sqrt();
+            if len < 0.01 {
+                // Degenerate line -- draw a circle at the midpoint.
+                let path = canvas::Path::circle(
+                    Point::new((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                    half_width + inflate,
+                );
+                frame.stroke(&path, ring_stroke);
+            } else {
+                // Rotate so the line is horizontal, draw a rounded rect,
+                // then the existing transform handles the visual rotation.
+                let angle = dy.atan2(dx);
+                let total_half = half_width + inflate;
+                frame.push_transform();
+                frame.translate(Vector::new(*x1, *y1));
+                frame.rotate(Radians(angle));
+                let path = canvas::Path::rounded_rectangle(
+                    Point::new(-total_half, -total_half),
+                    Size::new(len + total_half * 2.0, total_half * 2.0),
+                    iced::border::Radius::from(total_half),
+                );
+                frame.stroke(&path, ring_stroke);
+                frame.pop_transform();
+            }
+        }
+    }
+
+    frame.pop_transform();
 }
 
 /// Draw a tooltip overlay at the cursor position.
@@ -2154,37 +2264,14 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
 
         // Focus ring overlay (uncached, drawn on top of everything).
-        // Uses the focused element's transform to position the ring correctly
-        // in canvas space, even for rotated/scaled elements.
+        // Shape adapts to the element's hit region (rect/circle/line)
+        // and the full accumulated transform is applied.
         if let Some(focused_id) = &state.focused_id {
             if let Some(element) = self.interactive_elements.iter().find(|e| &e.id == focused_id) {
                 if element.show_focus_ring {
-                    let rect = hit_region_to_rect(&element.hit_region);
                     let mut frame = canvas::Frame::new(renderer, bounds.size());
-
-                    // Apply the element's accumulated transform so the
-                    // focus ring matches the element's visual position.
-                    frame.push_transform();
-                    frame.translate(Vector::new(element.transform.tx, element.transform.ty));
-                    // For full transform support (rotation/scale), we'd need
-                    // to decompose the matrix. For now, apply just the
-                    // translation. Phase 2.8 will add geometry-aware rings.
-                    // TODO(phase-2.8): apply full transform to focus ring
-
-                    let ring_path = canvas::Path::rounded_rectangle(
-                        Point::new(rect.x - 2.0, rect.y - 2.0),
-                        Size::new(rect.width + 4.0, rect.height + 4.0),
-                        iced::border::Radius::from(3.0),
-                    );
                     let focus_color = theme.palette().primary.base.color;
-                    frame.stroke(
-                        &ring_path,
-                        canvas::Stroke::default()
-                            .with_color(focus_color)
-                            .with_width(2.0),
-                    );
-
-                    frame.pop_transform();
+                    draw_focus_ring(&mut frame, element, focus_color, 2.0, 2.0);
                     geometries.push(frame.into_geometry());
                 }
             }
@@ -4033,4 +4120,80 @@ mod tests {
         let miss = find_hit_element(Point::new(175.0, 175.0), &elements);
         assert!(miss.is_none());
     }
+
+    // -- TransformMatrix::decompose tests --
+
+    #[test]
+    fn decompose_identity() {
+        let (tx, ty, angle, sx, sy) = TransformMatrix::identity().decompose();
+        assert!((tx).abs() < 0.001);
+        assert!((ty).abs() < 0.001);
+        assert!((angle).abs() < 0.001);
+        assert!((sx - 1.0).abs() < 0.001);
+        assert!((sy - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn decompose_translate_only() {
+        let m = TransformMatrix::identity().translate(42.0, -17.0);
+        let (tx, ty, angle, sx, sy) = m.decompose();
+        assert!((tx - 42.0).abs() < 0.001);
+        assert!((ty - (-17.0)).abs() < 0.001);
+        assert!((angle).abs() < 0.001);
+        assert!((sx - 1.0).abs() < 0.001);
+        assert!((sy - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn decompose_rotate_only() {
+        let angle_in = 0.7;
+        let m = TransformMatrix::identity().rotate(angle_in);
+        let (tx, ty, angle, sx, sy) = m.decompose();
+        assert!((tx).abs() < 0.001);
+        assert!((ty).abs() < 0.001);
+        assert!((angle - angle_in).abs() < 0.001, "angle={angle}");
+        assert!((sx - 1.0).abs() < 0.001);
+        assert!((sy - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn decompose_scale_only() {
+        let m = TransformMatrix::identity().scale(3.0, 0.5);
+        let (tx, ty, angle, sx, sy) = m.decompose();
+        assert!((tx).abs() < 0.001);
+        assert!((ty).abs() < 0.001);
+        assert!((angle).abs() < 0.001);
+        assert!((sx - 3.0).abs() < 0.001, "sx={sx}");
+        assert!((sy - 0.5).abs() < 0.001, "sy={sy}");
+    }
+
+    #[test]
+    fn decompose_roundtrip() {
+        // Build a complex matrix, decompose it, rebuild, and verify
+        // the same point is transformed identically.
+        let original = TransformMatrix::identity()
+            .translate(50.0, 30.0)
+            .rotate(0.5)
+            .scale(2.0, 1.5);
+        let (tx, ty, angle, sx, sy) = original.decompose();
+        let rebuilt = TransformMatrix::identity()
+            .translate(tx, ty)
+            .rotate(angle)
+            .scale(sx, sy);
+
+        // Test several points.
+        for &(px, py) in &[(0.0, 0.0), (10.0, 20.0), (-5.0, 15.0)] {
+            let (ox, oy) = original.transform_point(px, py);
+            let (rx, ry) = rebuilt.transform_point(px, py);
+            assert!(
+                (ox - rx).abs() < 0.1 && (oy - ry).abs() < 0.1,
+                "point ({px},{py}): original=({ox},{oy}), rebuilt=({rx},{ry})"
+            );
+        }
+    }
+
+    // draw_focus_ring is tested visually (requires a real Renderer).
+    // The decompose + apply_to_frame math is verified by the decompose
+    // tests above -- the draw function is straightforward path construction
+    // delegating to iced's Path::rounded_rectangle / Path::circle.
 }
