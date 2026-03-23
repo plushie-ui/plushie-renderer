@@ -3506,4 +3506,531 @@ mod tests {
         assert!((tx - 100.0).abs() < 0.01, "tx={tx}");
         assert!((ty - 50.0).abs() < 0.01, "ty={ty}");
     }
+
+    // -- TransformMatrix::compose tests --
+
+    #[test]
+    fn compose_identity_is_noop() {
+        let m = TransformMatrix::identity().translate(10.0, 20.0);
+        let id = TransformMatrix::identity();
+        let composed = m.compose(&id);
+        let (x, y) = composed.transform_point(0.0, 0.0);
+        assert!((x - 10.0).abs() < 0.001);
+        assert!((y - 20.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn compose_translate_then_scale() {
+        let parent = TransformMatrix::identity().translate(100.0, 0.0);
+        let local = TransformMatrix::identity().scale(2.0, 2.0);
+        let composed = parent.compose(&local);
+        // Point (5, 5) -> scale(2,2) -> (10, 10) -> translate(100, 0) -> (110, 10)
+        let (x, y) = composed.transform_point(5.0, 5.0);
+        assert!((x - 110.0).abs() < 0.01, "x={x}");
+        assert!((y - 10.0).abs() < 0.01, "y={y}");
+    }
+
+    #[test]
+    fn compose_matches_chained_transforms() {
+        // compose(parent, local) should equal parent.translate().rotate()
+        // when local = translate then rotate
+        let parent = TransformMatrix::identity().translate(50.0, 0.0);
+        let local = TransformMatrix::identity()
+            .translate(10.0, 0.0)
+            .rotate(std::f32::consts::FRAC_PI_2);
+        let composed = parent.compose(&local);
+        let chained = TransformMatrix::identity()
+            .translate(50.0, 0.0)
+            .translate(10.0, 0.0)
+            .rotate(std::f32::consts::FRAC_PI_2);
+        // Both should transform (1, 0) the same way.
+        let (cx, cy) = composed.transform_point(1.0, 0.0);
+        let (sx, sy) = chained.transform_point(1.0, 0.0);
+        assert!((cx - sx).abs() < 0.01, "x: composed={cx}, chained={sx}");
+        assert!((cy - sy).abs() < 0.01, "y: composed={cy}, chained={sy}");
+    }
+
+    // -- hit_test epsilon tolerance --
+
+    #[test]
+    fn hit_test_rect_boundary_with_epsilon() {
+        // Point exactly on the boundary should hit (within epsilon).
+        let region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        assert!(hit_test(Point::new(0.0, 0.0), &region));
+        assert!(hit_test(Point::new(100.0, 50.0), &region));
+        // Slightly outside but within epsilon (0.5px).
+        assert!(hit_test(Point::new(-0.3, -0.3), &region));
+        assert!(hit_test(Point::new(100.3, 50.3), &region));
+        // Beyond epsilon.
+        assert!(!hit_test(Point::new(-1.0, 0.0), &region));
+        assert!(!hit_test(Point::new(0.0, -1.0), &region));
+    }
+
+    // -- Clip inheritance through nested groups --
+
+    #[test]
+    fn nested_clip_is_intersected() {
+        // Outer group clips to (0,0,100,100).
+        // Inner group clips to (50,50,100,100).
+        // Effective clip should be intersection: (50,50,50,50).
+        let shapes = vec![json!({
+            "type": "group",
+            "clip": {"x": 0, "y": 0, "w": 100, "h": 100},
+            "children": [{
+                "type": "group",
+                "id": "inner",
+                "on_click": true,
+                "clip": {"x": 50, "y": 50, "w": 100, "h": 100},
+                "children": [{"type": "rect", "x": 0, "y": 0, "w": 200, "h": 200}]
+            }]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        assert_eq!(elements.len(), 1);
+        let clip = elements[0].clip_rect.unwrap();
+        // Intersection of (0,0,100,100) and (50,50,100,100) = (50,50,50,50).
+        assert!((clip.0 - 50.0).abs() < 0.01, "clip x={}", clip.0);
+        assert!((clip.1 - 50.0).abs() < 0.01, "clip y={}", clip.1);
+        assert!((clip.2 - 50.0).abs() < 0.01, "clip w={}", clip.2);
+        assert!((clip.3 - 50.0).abs() < 0.01, "clip h={}", clip.3);
+    }
+
+    #[test]
+    fn clip_from_parent_propagates_to_child() {
+        // Parent has a clip, child has none.
+        // Child should inherit the parent's clip.
+        let shapes = vec![json!({
+            "type": "group",
+            "clip": {"x": 10, "y": 10, "w": 80, "h": 80},
+            "children": [{
+                "type": "group",
+                "id": "child",
+                "on_click": true,
+                "children": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 100}]
+            }]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        assert_eq!(elements.len(), 1);
+        let clip = elements[0].clip_rect.unwrap();
+        assert!((clip.0 - 10.0).abs() < 0.01);
+        assert!((clip.1 - 10.0).abs() < 0.01);
+        assert!((clip.2 - 80.0).abs() < 0.01);
+        assert!((clip.3 - 80.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn no_clip_means_no_clip_rect() {
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "noclip",
+            "on_click": true,
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 50, "h": 50}]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        assert!(elements[0].clip_rect.is_none());
+    }
+
+    // -- set_focus and resolve_focus_index --
+
+    /// Helper to build a minimal CanvasProgram for state-machine tests.
+    fn test_program(elements: &[InteractiveElement]) -> CanvasProgram<'_> {
+        static IMAGES: std::sync::LazyLock<crate::image_registry::ImageRegistry> =
+            std::sync::LazyLock::new(crate::image_registry::ImageRegistry::new);
+        CanvasProgram {
+            layers: vec![],
+            caches: None,
+            background: None,
+            id: "test-canvas".to_string(),
+            on_press: false,
+            on_release: false,
+            on_move: false,
+            on_scroll: false,
+            images: &IMAGES,
+            interactive_elements: elements,
+        }
+    }
+
+    /// Helper to build a minimal InteractiveElement.
+    fn test_element(id: &str) -> InteractiveElement {
+        InteractiveElement {
+            id: id.to_string(),
+            layer: "default".to_string(),
+            hit_region: HitRegion::Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 },
+            transform: TransformMatrix::identity(),
+            inverse_transform: Some(TransformMatrix::identity()),
+            clip_rect: None,
+            on_click: true,
+            on_hover: false,
+            draggable: false,
+            drag_axis: DragAxis::Both,
+            drag_bounds: None,
+            cursor: None,
+            has_hover_style: false,
+            has_pressed_style: false,
+            has_focus_style: false,
+            show_focus_ring: true,
+            focusable: false,
+            tooltip: None,
+            a11y: None,
+        }
+    }
+
+    #[test]
+    fn resolve_focus_index_finds_element() {
+        let elements = vec![test_element("a"), test_element("b"), test_element("c")];
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("b".to_string()),
+        };
+        assert_eq!(program.resolve_focus_index(&state), Some(1));
+    }
+
+    #[test]
+    fn resolve_focus_index_returns_none_for_missing() {
+        let elements = vec![test_element("a"), test_element("b")];
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("deleted".to_string()),
+        };
+        assert_eq!(program.resolve_focus_index(&state), None);
+    }
+
+    #[test]
+    fn resolve_focus_index_returns_none_when_unfocused() {
+        let elements = vec![test_element("a")];
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: None,
+        };
+        assert_eq!(program.resolve_focus_index(&state), None);
+    }
+
+    #[test]
+    fn set_focus_from_none_to_element() {
+        let elements = vec![test_element("a"), test_element("b")];
+        let program = test_program(&elements);
+        let mut state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: None,
+        };
+        let msg = program.set_focus(&mut state, Some(1));
+        assert!(msg.is_some());
+        assert_eq!(state.focused_id, Some("b".to_string()));
+        match msg.unwrap() {
+            Message::CanvasElementFocusChanged {
+                old_element_id,
+                new_element_id,
+                ..
+            } => {
+                assert_eq!(old_element_id, None);
+                assert_eq!(new_element_id, Some("b".to_string()));
+            }
+            other => panic!("expected FocusChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_focus_between_elements() {
+        let elements = vec![test_element("a"), test_element("b")];
+        let program = test_program(&elements);
+        let mut state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("a".to_string()),
+        };
+        let msg = program.set_focus(&mut state, Some(1));
+        assert!(msg.is_some());
+        assert_eq!(state.focused_id, Some("b".to_string()));
+        match msg.unwrap() {
+            Message::CanvasElementFocusChanged {
+                old_element_id,
+                new_element_id,
+                ..
+            } => {
+                assert_eq!(old_element_id, Some("a".to_string()));
+                assert_eq!(new_element_id, Some("b".to_string()));
+            }
+            other => panic!("expected FocusChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_focus_to_same_is_noop() {
+        let elements = vec![test_element("a"), test_element("b")];
+        let program = test_program(&elements);
+        let mut state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("a".to_string()),
+        };
+        let msg = program.set_focus(&mut state, Some(0));
+        assert!(msg.is_none());
+        assert_eq!(state.focused_id, Some("a".to_string()));
+    }
+
+    #[test]
+    fn set_focus_clear() {
+        let elements = vec![test_element("a")];
+        let program = test_program(&elements);
+        let mut state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("a".to_string()),
+        };
+        let msg = program.set_focus(&mut state, None);
+        assert!(msg.is_some());
+        assert_eq!(state.focused_id, None);
+        match msg.unwrap() {
+            Message::CanvasElementFocusChanged {
+                old_element_id,
+                new_element_id,
+                ..
+            } => {
+                assert_eq!(old_element_id, Some("a".to_string()));
+                assert_eq!(new_element_id, None);
+            }
+            other => panic!("expected FocusChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_focus_clear_when_already_none() {
+        let elements = vec![test_element("a")];
+        let program = test_program(&elements);
+        let mut state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: None,
+        };
+        let msg = program.set_focus(&mut state, None);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn set_focus_out_of_bounds_clears() {
+        let elements = vec![test_element("a")];
+        let program = test_program(&elements);
+        let mut state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("a".to_string()),
+        };
+        // Index 99 is out of bounds -> new_id becomes None -> blur.
+        let msg = program.set_focus(&mut state, Some(99));
+        assert!(msg.is_some());
+        assert_eq!(state.focused_id, None);
+    }
+
+    // -- layers_with_active_interaction --
+
+    #[test]
+    fn layers_active_hover_style() {
+        let mut elements = vec![test_element("btn")];
+        elements[0].layer = "ui".to_string();
+        elements[0].has_hover_style = true;
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: Some("btn".to_string()),
+            pressed_element: None,
+            dragging: None,
+            focused_id: None,
+        };
+        let layers = program.layers_with_active_interaction(&state);
+        assert_eq!(layers, vec!["ui"]);
+    }
+
+    #[test]
+    fn layers_active_focus_style() {
+        let mut elements = vec![test_element("btn")];
+        elements[0].layer = "ui".to_string();
+        elements[0].has_focus_style = true;
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: None,
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("btn".to_string()),
+        };
+        let layers = program.layers_with_active_interaction(&state);
+        assert_eq!(layers, vec!["ui"]);
+    }
+
+    #[test]
+    fn layers_active_hover_and_focus_on_different_layers() {
+        let mut hover_elem = test_element("hover-btn");
+        hover_elem.layer = "layer-a".to_string();
+        hover_elem.has_hover_style = true;
+        let mut focus_elem = test_element("focus-btn");
+        focus_elem.layer = "layer-b".to_string();
+        focus_elem.has_focus_style = true;
+        let elements = vec![hover_elem, focus_elem];
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: Some("hover-btn".to_string()),
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("focus-btn".to_string()),
+        };
+        let layers = program.layers_with_active_interaction(&state);
+        assert_eq!(layers.len(), 2);
+        assert!(layers.contains(&"layer-a".to_string()));
+        assert!(layers.contains(&"layer-b".to_string()));
+    }
+
+    #[test]
+    fn layers_active_hover_and_focus_on_same_layer_no_dupe() {
+        let mut hover_elem = test_element("hover-btn");
+        hover_elem.layer = "ui".to_string();
+        hover_elem.has_hover_style = true;
+        let mut focus_elem = test_element("focus-btn");
+        focus_elem.layer = "ui".to_string();
+        focus_elem.has_focus_style = true;
+        let elements = vec![hover_elem, focus_elem];
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: Some("hover-btn".to_string()),
+            pressed_element: None,
+            dragging: None,
+            focused_id: Some("focus-btn".to_string()),
+        };
+        let layers = program.layers_with_active_interaction(&state);
+        // Should not duplicate "ui".
+        assert_eq!(layers, vec!["ui"]);
+    }
+
+    #[test]
+    fn layers_active_no_style_returns_empty() {
+        let elements = vec![test_element("btn")]; // no style flags
+        let program = test_program(&elements);
+        let state = CanvasState {
+            cursor_position: None,
+            hovered_element: Some("btn".to_string()),
+            pressed_element: None,
+            dragging: None,
+            focused_id: None,
+        };
+        let layers = program.layers_with_active_interaction(&state);
+        assert!(layers.is_empty());
+    }
+
+    // -- find_hit_element edge cases --
+
+    #[test]
+    fn find_hit_element_empty_list() {
+        assert!(find_hit_element(Point::new(0.0, 0.0), &[]).is_none());
+    }
+
+    #[test]
+    fn find_hit_element_singular_transform_not_hittable() {
+        // Element with scale(0, 1) -> singular matrix -> inverse is None.
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "collapsed",
+            "on_click": true,
+            "transforms": [{"type": "scale", "x": 0, "y": 1}],
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 100}]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        assert_eq!(elements.len(), 1);
+        assert!(elements[0].inverse_transform.is_none());
+        // Can't hit an element with a singular transform.
+        let hit = find_hit_element(Point::new(50.0, 50.0), &elements);
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn find_hit_element_topmost_wins() {
+        // Two overlapping elements. Last in list = topmost = tested first.
+        let mut a = test_element("bottom");
+        a.hit_region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        let mut b = test_element("top");
+        b.hit_region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        let elements = vec![a, b];
+        let hit = find_hit_element(Point::new(50.0, 50.0), &elements).unwrap();
+        assert_eq!(hit.id, "top");
+    }
+
+    #[test]
+    fn find_hit_element_skips_non_interactive() {
+        // Element with on_click=false, on_hover=false, draggable=false.
+        let mut elem = test_element("passive");
+        elem.on_click = false;
+        elem.hit_region = HitRegion::Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+        let elements = vec![elem];
+        let hit = find_hit_element(Point::new(50.0, 50.0), &elements);
+        assert!(hit.is_none());
+    }
+
+    // -- Transformed clip test --
+
+    #[test]
+    fn clip_transformed_by_group_matrix() {
+        // Group at translated (100, 100) with clip (0,0,50,50).
+        // In canvas space, the clip should be at (100,100,50,50).
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "shifted-clip",
+            "on_click": true,
+            "transforms": [{"type": "translate", "x": 100, "y": 100}],
+            "clip": {"x": 0, "y": 0, "w": 50, "h": 50},
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 100, "h": 100}]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+        );
+        let clip = elements[0].clip_rect.unwrap();
+        assert!((clip.0 - 100.0).abs() < 0.01, "clip x={}", clip.0);
+        assert!((clip.1 - 100.0).abs() < 0.01, "clip y={}", clip.1);
+        assert!((clip.2 - 50.0).abs() < 0.01, "clip w={}", clip.2);
+        assert!((clip.3 - 50.0).abs() < 0.01, "clip h={}", clip.3);
+
+        // Hit inside clip (canvas 125, 125 -> local 25, 25 -> in rect).
+        let hit = find_hit_element(Point::new(125.0, 125.0), &elements);
+        assert!(hit.is_some());
+
+        // Hit outside clip but inside transformed rect.
+        let miss = find_hit_element(Point::new(175.0, 175.0), &elements);
+        assert!(miss.is_none());
+    }
 }
