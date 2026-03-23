@@ -47,6 +47,7 @@ impl App {
             | Message::CanvasElementDragEnd { .. }
             | Message::CanvasElementFocused { .. }
             | Message::CanvasElementBlurred { .. }
+            | Message::CanvasElementFocusChanged { .. }
             | Message::CanvasFocused { .. }
             | Message::CanvasBlurred { .. }
             | Message::CanvasGroupFocused { .. }

@@ -201,6 +201,18 @@ pub enum Message {
         canvas_id: String,
         element_id: String,
     },
+    /// Focus moved between elements within a canvas. Emitted as a single
+    /// iced Message because `Program::update()` can only return one action,
+    /// but the emitter splits this into separate `canvas_element_blurred`
+    /// and `canvas_element_focused` outgoing events (in that order).
+    ///
+    /// When `old_element_id` is `None`, only focus is emitted (first focus).
+    /// When `new_element_id` is `None`, only blur is emitted (focus cleared).
+    CanvasElementFocusChanged {
+        canvas_id: String,
+        old_element_id: Option<String>,
+        new_element_id: Option<String>,
+    },
     /// The canvas widget itself gained iced-level focus (Tab or click).
     CanvasFocused { canvas_id: String },
     /// The canvas widget itself lost iced-level focus.

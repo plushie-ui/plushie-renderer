@@ -150,6 +150,23 @@ impl TransformMatrix {
         )
     }
 
+    /// Compose this matrix with another: `self * other`.
+    ///
+    /// The result maps points through `other` first, then through `self`.
+    /// This matches the "append" convention: `parent.compose(&local)`
+    /// produces a matrix that applies the local transform in the parent's
+    /// coordinate space.
+    pub fn compose(&self, other: &Self) -> Self {
+        Self {
+            a: self.a * other.a + self.b * other.c,
+            b: self.a * other.b + self.b * other.d,
+            c: self.c * other.a + self.d * other.c,
+            d: self.c * other.b + self.d * other.d,
+            tx: self.a * other.tx + self.b * other.ty + self.tx,
+            ty: self.c * other.tx + self.d * other.ty + self.ty,
+        }
+    }
+
     /// Compute the inverse matrix, or `None` if the matrix is singular
     /// (determinant is zero, meaning the transform collapses a dimension).
     pub fn inverse(&self) -> Option<Self> {
@@ -806,8 +823,11 @@ struct CanvasState {
     pressed_element: Option<String>,
     /// Active drag state (element being dragged).
     dragging: Option<DragState>,
-    /// Index of the interactive element that has keyboard focus.
-    focused_index: Option<usize>,
+    /// ID of the interactive element that has keyboard focus.
+    /// ID-based (not index-based) so focus survives element reordering
+    /// between renders. When the focused element is removed, focus is
+    /// cleared and a blur event is emitted.
+    focused_id: Option<String>,
 }
 
 struct CanvasProgram<'a> {
@@ -836,24 +856,42 @@ impl CanvasProgram<'_> {
             || !self.interactive_elements.is_empty()
     }
 
-    /// Find the layer name that currently has an active hover or pressed
-    /// shape with style overrides. Returns `None` if no interaction is
-    /// active or the active shape has no style overrides.
-    fn layer_with_active_interaction(&self, state: &CanvasState) -> Option<String> {
-        // Pressed takes priority -- if the user is pressing a shape on
-        // layer A while hovering a shape on layer B, layer A needs the
-        // force-redraw for pressed_style.
+    /// Collect layer names that need cache bypass due to active
+    /// interaction state (hover_style, pressed_style, or focus_style).
+    ///
+    /// Multiple layers can be active simultaneously (e.g., hover on
+    /// layer A while focus is on layer B). All returned layers are
+    /// redrawn fresh with style overrides applied.
+    fn layers_with_active_interaction(&self, state: &CanvasState) -> Vec<String> {
+        let mut layers = Vec::new();
+
+        // Hover/pressed style.
         let active_id = state
             .pressed_element
             .as_deref()
             .or(state.hovered_element.as_deref());
-        let active_id = active_id?;
-        let shape = self.interactive_elements.iter().find(|s| s.id == active_id)?;
-        if shape.has_hover_style || shape.has_pressed_style {
-            Some(shape.layer.clone())
-        } else {
-            None
+        if let Some(id) = active_id {
+            if let Some(shape) = self.interactive_elements.iter().find(|s| s.id == id) {
+                if shape.has_hover_style || shape.has_pressed_style {
+                    layers.push(shape.layer.clone());
+                }
+            }
         }
+
+        // Keyboard focus with focus_style.
+        if let Some(ref focused_id) = state.focused_id {
+            if let Some(shape) = self
+                .interactive_elements
+                .iter()
+                .find(|s| &s.id == focused_id)
+            {
+                if shape.has_focus_style && !layers.contains(&shape.layer) {
+                    layers.push(shape.layer.clone());
+                }
+            }
+        }
+
+        layers
     }
 
     /// Get the tooltip text for the currently hovered shape, if any.
@@ -864,6 +902,58 @@ impl CanvasProgram<'_> {
             .iter()
             .find(|s| s.id == hovered_id)?;
         shape.tooltip.clone()
+    }
+
+    /// Resolve the currently focused element ID to its index in the
+    /// interactive elements list. Returns `None` if no element is focused
+    /// or the focused element no longer exists (removed between renders).
+    fn resolve_focus_index(&self, state: &CanvasState) -> Option<usize> {
+        let focused_id = state.focused_id.as_deref()?;
+        self.interactive_elements
+            .iter()
+            .position(|e| e.id == focused_id)
+    }
+
+    /// Transition focus to a new element by index. Returns a single
+    /// [`CanvasElementFocusChanged`](Message::CanvasElementFocusChanged)
+    /// message that the emitter splits into separate blur + focus
+    /// outgoing events (in that order).
+    ///
+    /// Pass `None` for `new_index` to clear focus without moving to
+    /// another element (e.g., Escape or click-on-empty).
+    ///
+    /// Returns `None` if no state change occurred (already focused on
+    /// the target, or clearing focus when nothing was focused).
+    fn set_focus(
+        &self,
+        state: &mut CanvasState,
+        new_index: Option<usize>,
+    ) -> Option<Message> {
+        let old_id = state.focused_id.take();
+
+        let new_id = new_index
+            .filter(|&idx| idx < self.interactive_elements.len())
+            .map(|idx| self.interactive_elements[idx].id.clone());
+
+        // No-op if focus didn't actually change.
+        if old_id == new_id {
+            // Restore the original focused_id since we took it.
+            state.focused_id = old_id;
+            return None;
+        }
+
+        state.focused_id = new_id.clone();
+
+        // Only emit a message if something actually changed.
+        if old_id.is_some() || new_id.is_some() {
+            Some(Message::CanvasElementFocusChanged {
+                canvas_id: self.id.clone(),
+                old_element_id: old_id,
+                new_element_id: new_id,
+            })
+        } else {
+            None
+        }
     }
 
     /// Draw shapes with hover/pressed/focus style overrides applied to the
@@ -882,6 +972,7 @@ impl CanvasProgram<'_> {
     ) {
         let hovered = state.hovered_element.as_deref();
         let pressed = state.pressed_element.as_deref();
+        let focused = state.focused_id.as_deref();
 
         for &shape in shapes {
             let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -889,8 +980,10 @@ impl CanvasProgram<'_> {
             if shape_type == "group" {
                 // Interactive ID is now at the group's top level.
                 let group_id = shape.get("id").and_then(|v| v.as_str());
-                let group_active =
-                    group_id.is_some_and(|gid| pressed == Some(gid) || hovered == Some(gid));
+                let is_pressed = group_id.is_some_and(|gid| pressed == Some(gid));
+                let is_hovered = group_id.is_some_and(|gid| hovered == Some(gid));
+                let is_focused = group_id.is_some_and(|gid| focused == Some(gid));
+                let group_active = is_pressed || is_hovered || is_focused;
 
                 if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
                     let has_transforms = shape.get("transforms")
@@ -904,15 +997,28 @@ impl CanvasProgram<'_> {
 
                     let draw_children = |f: &mut canvas::Frame, child_refs: &[&Value], img: &crate::image_registry::ImageRegistry| {
                         if group_active {
-                            let is_pressed = group_id.is_some_and(|gid| pressed == Some(gid));
                             for &child in child_refs {
-                                // Per-child style overrides. Priority: pressed > hover > focus.
+                                // Per-child style overrides.
+                                // Priority: pressed > hover > focus.
                                 let override_style = if is_pressed {
                                     child.get("pressed_style")
                                 } else {
                                     None
                                 }
-                                .or_else(|| child.get("hover_style"));
+                                .or_else(|| {
+                                    if is_hovered {
+                                        child.get("hover_style")
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .or_else(|| {
+                                    if is_focused {
+                                        child.get("focus_style")
+                                    } else {
+                                        None
+                                    }
+                                });
 
                                 if let Some(overrides) = override_style {
                                     let merged = merge_shape_style(child, overrides);
@@ -1753,16 +1859,30 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 // draggable, we start a drag (click never fires for it).
                 // If it's only clickable, we track pressed state for
                 // click detection on release.
-                if matches!(button, mouse::Button::Left)
-                    && let Some(shape) = find_hit_element(position, self.interactive_elements)
-                {
-                    if shape.draggable {
-                        state.dragging = Some(DragState {
-                            element_id: shape.id.clone(),
-                            last: position,
-                        });
-                    } else if shape.on_click {
-                        state.pressed_element = Some(shape.id.clone());
+                if matches!(button, mouse::Button::Left) {
+                    if let Some(shape) = find_hit_element(position, self.interactive_elements) {
+                        // Click-to-focus: move keyboard focus to clicked element.
+                        let clicked_idx = self
+                            .interactive_elements
+                            .iter()
+                            .position(|e| e.id == shape.id);
+                        if let Some(msg) = self.set_focus(state, clicked_idx) {
+                            action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                        }
+
+                        if shape.draggable {
+                            state.dragging = Some(DragState {
+                                element_id: shape.id.clone(),
+                                last: position,
+                            });
+                        } else if shape.on_click {
+                            state.pressed_element = Some(shape.id.clone());
+                        }
+                    } else if state.focused_id.is_some() {
+                        // Click on empty area -- clear focus.
+                        if let Some(msg) = self.set_focus(state, None) {
+                            action = Some(pick_action(action, iced::widget::Action::publish(msg)));
+                        }
                     }
                 }
 
@@ -1849,128 +1969,89 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
                 if !self.interactive_elements.is_empty() =>
             {
+                // Suppress keyboard navigation during active drag.
+                if state.dragging.is_some() {
+                    return Some(iced::widget::Action::capture());
+                }
+
                 use keyboard::key::Named;
                 let count = self.interactive_elements.len();
-                // Validate focused_index against current shape count
-                // (shapes may have changed between renders).
-                if state.focused_index.is_some_and(|idx| idx >= count) {
-                    state.focused_index = None;
+
+                // Resolve focused_id to a current index. If the focused
+                // element was removed between renders, clear focus and
+                // emit blur before handling the new key.
+                let current_idx = self.resolve_focus_index(state);
+                if current_idx.is_none() && state.focused_id.is_some() {
+                    // Focused element was removed between renders. Emit
+                    // blur and consume this keypress. The next keypress
+                    // will start fresh with focused_id = None.
+                    if let Some(msg) = self.set_focus(state, None) {
+                        return Some(iced::widget::Action::publish(msg).and_capture());
+                    }
                 }
+
+                // Helper: set focus and return a capturing action.
+                let focus_to = |state: &mut CanvasState, idx: Option<usize>| -> Option<iced::widget::Action<Message>> {
+                    match self.set_focus(state, idx) {
+                        Some(msg) => Some(iced::widget::Action::publish(msg).and_capture()),
+                        None => Some(iced::widget::Action::capture()),
+                    }
+                };
+
                 match key {
                     keyboard::Key::Named(Named::Tab) if !modifiers.shift() => {
-                        match state.focused_index {
-                            None => {
-                                state.focused_index = Some(0);
-                                let element_id = self.interactive_elements[0].id.clone();
-                                Some(
-                                    iced::widget::Action::publish(Message::CanvasElementFocused {
-                                        canvas_id: self.id.clone(),
-                                        element_id,
-                                    })
-                                    .and_capture(),
-                                )
-                            }
-                            Some(idx) if idx + 1 < count => {
-                                let next = idx + 1;
-                                state.focused_index = Some(next);
-                                let element_id = self.interactive_elements[next].id.clone();
-                                Some(
-                                    iced::widget::Action::publish(Message::CanvasElementFocused {
-                                        canvas_id: self.id.clone(),
-                                        element_id,
-                                    })
-                                    .and_capture(),
-                                )
-                            }
+                        match current_idx {
+                            None => focus_to(state, Some(0)),
+                            Some(idx) if idx + 1 < count => focus_to(state, Some(idx + 1)),
                             Some(_) => {
-                                // At last element -- clear focus, let Tab propagate.
-                                state.focused_index = None;
+                                // At last element -- let Tab propagate.
+                                // DON'T clear focused_id here. When Tab
+                                // moves iced focus to the next widget,
+                                // on_focus_lost will emit the blur event
+                                // and preserve focused_id for re-entry.
                                 None
                             }
                         }
                     }
                     keyboard::Key::Named(Named::Tab) if modifiers.shift() => {
-                        match state.focused_index {
-                            None => {
-                                // Focus last element.
-                                let last = count - 1;
-                                state.focused_index = Some(last);
-                                let element_id = self.interactive_elements[last].id.clone();
-                                Some(
-                                    iced::widget::Action::publish(Message::CanvasElementFocused {
-                                        canvas_id: self.id.clone(),
-                                        element_id,
-                                    })
-                                    .and_capture(),
-                                )
-                            }
+                        match current_idx {
+                            None => focus_to(state, Some(count - 1)),
                             Some(0) => {
-                                // At first element -- clear focus, let Shift+Tab propagate.
-                                state.focused_index = None;
+                                // At first element -- let Shift+Tab propagate.
+                                // Same as Tab-exit above: on_focus_lost handles blur.
                                 None
                             }
-                            Some(idx) => {
-                                let prev = idx - 1;
-                                state.focused_index = Some(prev);
-                                let element_id = self.interactive_elements[prev].id.clone();
-                                Some(
-                                    iced::widget::Action::publish(Message::CanvasElementFocused {
-                                        canvas_id: self.id.clone(),
-                                        element_id,
-                                    })
-                                    .and_capture(),
-                                )
-                            }
+                            Some(idx) => focus_to(state, Some(idx - 1)),
                         }
                     }
                     keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight) => {
-                        let next = match state.focused_index {
+                        let next = match current_idx {
                             None => 0,
                             Some(idx) => (idx + 1) % count,
                         };
-                        state.focused_index = Some(next);
-                        let element_id = self.interactive_elements[next].id.clone();
-                        Some(
-                            iced::widget::Action::publish(Message::CanvasElementFocused {
-                                canvas_id: self.id.clone(),
-                                element_id,
-                            })
-                            .and_capture(),
-                        )
+                        focus_to(state, Some(next))
                     }
                     keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft) => {
-                        let prev = match state.focused_index {
-                            None => count - 1,
-                            Some(0) => count - 1,
+                        let prev = match current_idx {
+                            None | Some(0) => count - 1,
                             Some(idx) => idx - 1,
                         };
-                        state.focused_index = Some(prev);
-                        let element_id = self.interactive_elements[prev].id.clone();
-                        Some(
-                            iced::widget::Action::publish(Message::CanvasElementFocused {
-                                canvas_id: self.id.clone(),
-                                element_id,
-                            })
-                            .and_capture(),
-                        )
+                        focus_to(state, Some(prev))
                     }
                     keyboard::Key::Named(Named::Enter | Named::Space) => {
-                        if let Some(idx) = state.focused_index {
-                            let shape = &self.interactive_elements[idx];
-                            if shape.on_click {
-                                let center = hit_region_center(&shape.hit_region);
+                        if let Some(idx) = current_idx {
+                            let element = &self.interactive_elements[idx];
+                            if element.on_click {
+                                let center = hit_region_center(&element.hit_region);
                                 let msg = Message::CanvasElementClick {
                                     canvas_id: self.id.clone(),
-                                    element_id: shape.id.clone(),
+                                    element_id: element.id.clone(),
                                     x: center.x,
                                     y: center.y,
                                     button: "keyboard".to_string(),
                                 };
                                 Some(iced::widget::Action::publish(msg).and_capture())
                             } else {
-                                // Shape is focusable but not clickable
-                                // (e.g., draggable-only). Consume the key
-                                // but don't emit an event.
                                 Some(iced::widget::Action::capture())
                             }
                         } else {
@@ -1978,70 +2059,33 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         }
                     }
                     keyboard::Key::Named(Named::Escape) => {
-                        if state.focused_index.is_some() {
-                            state.focused_index = None;
-                            // Capture so Escape doesn't propagate to parent
-                            // widgets. Return None would let iced unfocus
-                            // the canvas, which is correct when nothing
-                            // internal was focused. But when we HAD internal
-                            // focus, Escape should only clear internal focus.
-                            Some(iced::widget::Action::capture())
+                        if state.focused_id.is_some() {
+                            // Blur focused element and capture so Escape
+                            // doesn't propagate. Canvas keeps iced focus
+                            // but no internal element is focused.
+                            match self.set_focus(state, None) {
+                                Some(msg) => {
+                                    Some(iced::widget::Action::publish(msg).and_capture())
+                                }
+                                None => Some(iced::widget::Action::capture()),
+                            }
                         } else {
                             // Nothing internally focused -- let Escape
                             // propagate (iced will unfocus the canvas).
                             None
                         }
                     }
-                    keyboard::Key::Named(Named::Home) => {
-                        state.focused_index = Some(0);
-                        let element_id = self.interactive_elements[0].id.clone();
-                        Some(
-                            iced::widget::Action::publish(Message::CanvasElementFocused {
-                                canvas_id: self.id.clone(),
-                                element_id,
-                            })
-                            .and_capture(),
-                        )
-                    }
-                    keyboard::Key::Named(Named::End) => {
-                        let last = count - 1;
-                        state.focused_index = Some(last);
-                        let element_id = self.interactive_elements[last].id.clone();
-                        Some(
-                            iced::widget::Action::publish(Message::CanvasElementFocused {
-                                canvas_id: self.id.clone(),
-                                element_id,
-                            })
-                            .and_capture(),
-                        )
-                    }
+                    keyboard::Key::Named(Named::Home) => focus_to(state, Some(0)),
+                    keyboard::Key::Named(Named::End) => focus_to(state, Some(count - 1)),
                     keyboard::Key::Named(Named::PageDown) => {
                         let page_size = 10.min(count);
-                        let idx = state.focused_index.unwrap_or(0);
-                        let new_idx = (idx + page_size).min(count - 1);
-                        state.focused_index = Some(new_idx);
-                        let element_id = self.interactive_elements[new_idx].id.clone();
-                        Some(
-                            iced::widget::Action::publish(Message::CanvasElementFocused {
-                                canvas_id: self.id.clone(),
-                                element_id,
-                            })
-                            .and_capture(),
-                        )
+                        let idx = current_idx.unwrap_or(0);
+                        focus_to(state, Some((idx + page_size).min(count - 1)))
                     }
                     keyboard::Key::Named(Named::PageUp) => {
                         let page_size = 10.min(count);
-                        let idx = state.focused_index.unwrap_or(0);
-                        let new_idx = idx.saturating_sub(page_size);
-                        state.focused_index = Some(new_idx);
-                        let element_id = self.interactive_elements[new_idx].id.clone();
-                        Some(
-                            iced::widget::Action::publish(Message::CanvasElementFocused {
-                                canvas_id: self.id.clone(),
-                                element_id,
-                            })
-                            .and_capture(),
-                        )
+                        let idx = current_idx.unwrap_or(0);
+                        focus_to(state, Some(idx.saturating_sub(page_size)))
                     }
                     _ => None,
                 }
@@ -2069,13 +2113,13 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
 
         // Determine which layers need fresh drawing due to active interaction.
-        let active_layer = self.layer_with_active_interaction(state);
+        let active_layers = self.layers_with_active_interaction(state);
 
         // Draw each layer, using its cache when available.
         let images = self.images;
         for (layer_name, shapes) in &self.layers {
             let shape_refs: Vec<&Value> = shapes.iter().collect();
-            let force_redraw = active_layer.as_deref() == Some(layer_name.as_str());
+            let force_redraw = active_layers.iter().any(|l| l == layer_name);
 
             let geom = if !force_redraw {
                 if let Some((_hash, cache)) = self.caches.and_then(|c| c.get(layer_name)) {
@@ -2088,8 +2132,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     frame.into_geometry()
                 }
             } else {
-                // Layer has active hover/pressed interaction -- clear cache
-                // and draw fresh with style overrides applied.
+                // Layer has active interaction (hover/pressed/focus style) --
+                // clear cache and draw fresh with style overrides applied.
                 if let Some((_hash, cache)) = self.caches.and_then(|c| c.get(layer_name)) {
                     cache.clear();
                 }
@@ -2110,25 +2154,40 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
         }
 
         // Focus ring overlay (uncached, drawn on top of everything).
-        if let Some(idx) = state.focused_index
-            && idx < self.interactive_elements.len()
-        {
-            let shape = &self.interactive_elements[idx];
-            let rect = hit_region_to_rect(&shape.hit_region);
-            let mut frame = canvas::Frame::new(renderer, bounds.size());
-            let ring_path = canvas::Path::rounded_rectangle(
-                Point::new(rect.x - 2.0, rect.y - 2.0),
-                Size::new(rect.width + 4.0, rect.height + 4.0),
-                iced::border::Radius::from(3.0),
-            );
-            let focus_color = theme.palette().primary.base.color;
-            frame.stroke(
-                &ring_path,
-                canvas::Stroke::default()
-                    .with_color(focus_color)
-                    .with_width(2.0),
-            );
-            geometries.push(frame.into_geometry());
+        // Uses the focused element's transform to position the ring correctly
+        // in canvas space, even for rotated/scaled elements.
+        if let Some(focused_id) = &state.focused_id {
+            if let Some(element) = self.interactive_elements.iter().find(|e| &e.id == focused_id) {
+                if element.show_focus_ring {
+                    let rect = hit_region_to_rect(&element.hit_region);
+                    let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+                    // Apply the element's accumulated transform so the
+                    // focus ring matches the element's visual position.
+                    frame.push_transform();
+                    frame.translate(Vector::new(element.transform.tx, element.transform.ty));
+                    // For full transform support (rotation/scale), we'd need
+                    // to decompose the matrix. For now, apply just the
+                    // translation. Phase 2.8 will add geometry-aware rings.
+                    // TODO(phase-2.8): apply full transform to focus ring
+
+                    let ring_path = canvas::Path::rounded_rectangle(
+                        Point::new(rect.x - 2.0, rect.y - 2.0),
+                        Size::new(rect.width + 4.0, rect.height + 4.0),
+                        iced::border::Radius::from(3.0),
+                    );
+                    let focus_color = theme.palette().primary.base.color;
+                    frame.stroke(
+                        &ring_path,
+                        canvas::Stroke::default()
+                            .with_color(focus_color)
+                            .with_width(2.0),
+                    );
+
+                    frame.pop_transform();
+                    geometries.push(frame.into_geometry());
+                }
+            }
         }
 
         geometries
@@ -2164,6 +2223,62 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
     fn is_focusable(&self, _state: &CanvasState) -> bool {
         !self.interactive_elements.is_empty()
+    }
+
+    fn on_focus_gained(
+        &self,
+        state: &mut CanvasState,
+    ) -> Vec<iced::widget::Action<Message>> {
+        let mut actions = vec![iced::widget::Action::publish(Message::CanvasFocused {
+            canvas_id: self.id.clone(),
+        })];
+        // If returning to a canvas that had internal focus, re-announce
+        // the focused element -- but only if it still exists. If it was
+        // removed while the canvas was unfocused, clear the stale ID.
+        if let Some(ref id) = state.focused_id {
+            let still_exists = self.interactive_elements.iter().any(|e| &e.id == id);
+            if still_exists {
+                actions.push(iced::widget::Action::publish(
+                    Message::CanvasElementFocused {
+                        canvas_id: self.id.clone(),
+                        element_id: id.clone(),
+                    },
+                ));
+            } else {
+                // Element was removed while canvas was unfocused.
+                // Emit blur for the stale element and clear.
+                actions.push(iced::widget::Action::publish(
+                    Message::CanvasElementBlurred {
+                        canvas_id: self.id.clone(),
+                        element_id: id.clone(),
+                    },
+                ));
+                state.focused_id = None;
+            }
+        }
+        actions
+    }
+
+    fn on_focus_lost(
+        &self,
+        state: &mut CanvasState,
+    ) -> Vec<iced::widget::Action<Message>> {
+        let mut actions = Vec::new();
+        // Emit blur for the currently focused element (but DON'T clear
+        // focused_id -- preserve position so re-entry via Tab returns
+        // to the same element).
+        if let Some(ref id) = state.focused_id {
+            actions.push(iced::widget::Action::publish(
+                Message::CanvasElementBlurred {
+                    canvas_id: self.id.clone(),
+                    element_id: id.clone(),
+                },
+            ));
+        }
+        actions.push(iced::widget::Action::publish(Message::CanvasBlurred {
+            canvas_id: self.id.clone(),
+        }));
+        actions
     }
 
     fn operate_accessible(
@@ -2371,17 +2486,7 @@ fn collect_interactive_elements(
         let group_matrix = match shape.get("transforms").and_then(|v| v.as_array()) {
             Some(arr) if !arr.is_empty() => {
                 let local = TransformMatrix::from_transforms(arr);
-                // Parent * local = canvas-space transform for this group.
-                // Since our transforms are "append" style (translate/rotate/scale
-                // applied left-to-right), the composition is: parent first, then local.
-                TransformMatrix {
-                    a: parent_transform.a * local.a + parent_transform.b * local.c,
-                    b: parent_transform.a * local.b + parent_transform.b * local.d,
-                    c: parent_transform.c * local.a + parent_transform.d * local.c,
-                    d: parent_transform.c * local.b + parent_transform.d * local.d,
-                    tx: parent_transform.a * local.tx + parent_transform.b * local.ty + parent_transform.tx,
-                    ty: parent_transform.c * local.tx + parent_transform.d * local.ty + parent_transform.ty,
-                }
+                parent_transform.compose(&local)
             }
             _ => parent_transform,
         };

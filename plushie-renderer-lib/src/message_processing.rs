@@ -64,7 +64,35 @@ pub fn process_widget_message(
         | Message::CanvasElementClick { .. }
         | Message::CanvasElementDrag { .. }
         | Message::CanvasElementDragEnd { .. }
-        | Message::CanvasElementFocused { .. }) => message_to_event(m).into_iter().collect(),
+        | Message::CanvasElementFocused { .. }
+        | Message::CanvasElementBlurred { .. }
+        | Message::CanvasFocused { .. }
+        | Message::CanvasBlurred { .. }
+        | Message::CanvasGroupFocused { .. }
+        | Message::CanvasGroupBlurred { .. }
+        | Message::Diagnostic { .. }) => message_to_event(m).into_iter().collect(),
+
+        // Focus transition produces up to 2 events (blur old + focus new).
+        Message::CanvasElementFocusChanged {
+            canvas_id,
+            old_element_id,
+            new_element_id,
+        } => {
+            let mut events = Vec::with_capacity(2);
+            if let Some(old_id) = old_element_id {
+                events.push(OutgoingEvent::canvas_element_blurred(
+                    canvas_id.clone(),
+                    old_id.clone(),
+                ));
+            }
+            if let Some(new_id) = new_element_id {
+                events.push(OutgoingEvent::canvas_element_focused(
+                    canvas_id.clone(),
+                    new_id.clone(),
+                ));
+            }
+            events
+        }
 
         // Slider -- needs value tracking for SlideRelease.
         Message::Slide(id, value) => {
