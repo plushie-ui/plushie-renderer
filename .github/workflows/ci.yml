@@ -42,4 +42,4 @@ jobs:
         run: cargo nextest run --workspace
 
       - name: Check WASM
-        run: cargo check --target wasm32-unknown-unknown -p plushie-core -p plushie-renderer -p plushie-wasm
+        run: cargo check --target wasm32-unknown-unknown -p plushie-ext -p plushie-renderer-lib -p plushie-renderer-wasm
