@@ -445,6 +445,7 @@ Perform an operation on a widget (focus, scroll, etc.).
 | `focus` | `target` | Focus a widget by ID |
 | `focus_next` | -- | Focus next focusable widget |
 | `focus_previous` | -- | Focus previous focusable widget |
+| `focus_element` | `target` (canvas ID), `element_id` | Focus a canvas and set internal focus to a specific element |
 | `scroll_to` | `target`, `offset_x`, `offset`/`offset_y` | Scroll to absolute offset |
 | `scroll_by` | `target`, `offset_x`, `offset_y` | Scroll by relative amount |
 | `snap_to` | `target`, `x`, `y` | Snap scrollable to relative position (0.0-1.0) |
@@ -759,9 +760,11 @@ interaction.
 | `slide` | synthetic only | Slide |
 | `paste` | synthetic only | Paste |
 | `sort` | synthetic only | Sort |
-| `canvas_press` | CursorMoved, ButtonPressed | Canvas press (also triggers shape events) |
-| `canvas_release` | CursorMoved, ButtonReleased | Canvas release (also triggers shape events) |
-| `canvas_move` | CursorMoved | Canvas move (also triggers shape enter/leave) |
+| `canvas_press` | CursorMoved, ButtonPressed | Canvas press (also triggers element events) |
+| `canvas_release` | CursorMoved, ButtonReleased | Canvas release (also triggers element events) |
+| `canvas_move` | CursorMoved | Canvas move (also triggers element enter/leave) |
+| `click_element` | CursorMoved, ButtonPressed, ButtonReleased | Click at coordinates within canvas |
+| `focus_element` | KeyPressed (Tab) | Tab into canvas |
 | `pane_focus_cycle` | synthetic only | Pane focus cycle |
 
 Actions marked **synthetic only** have no iced event equivalent
@@ -789,6 +792,8 @@ directly without widget processing.
 | `canvas_press` | `x` (number), `y` (number) | Canvas coordinates |
 | `canvas_release` | `x` (number), `y` (number) | Canvas coordinates |
 | `canvas_move` | `x` (number), `y` (number) | Canvas coordinates |
+| `click_element` | `x` (number), `y` (number) | Element center in canvas coordinates |
+| `focus_element` | (none) | |
 | `pane_focus_cycle` | (none) | |
 
 **Key format:**
@@ -1821,222 +1826,278 @@ at the iced level.
 
 ---
 
-## Interactive canvas shapes
+## Interactive canvas elements
 
-Shapes within canvas layers can include an `interactive` object to
-make them respond to pointer events, display tooltips, support drag
-gestures, accept keyboard navigation, and participate in the
-accessibility tree.
+Groups within canvas layers can be made interactive by adding an `id`
+field. An interactive group (called an "element" in the event
+vocabulary) responds to pointer events, keyboard navigation, drag
+gestures, tooltips, and participates in the accessibility tree.
 
-### The `interactive` field
+Only groups can be interactive. Leaf shapes (rect, circle, line, path,
+text, image, svg) are never interactive on their own -- wrap them in a
+group to add interaction.
 
-Any shape JSON object in a canvas layer can carry an `interactive`
-object with the following fields:
+### Terminology
+
+- **Shape**: a leaf drawing primitive (rect, circle, line, path, text,
+  image, svg). Pure visual, no interactivity.
+- **Group**: the only container type. Carries transforms, clips, and
+  optionally interactivity (when it has an `id` field).
+- **Element**: an interactive group (one with an `id`). The term used
+  in event names (`canvas_element_click`), commands (`focus_element`),
+  and test actions.
+
+### Group wire format
+
+A group with an `id` field is an interactive element. All interactive
+properties live at the group's top level (no nested `interactive`
+sub-object).
+
+```json
+{
+  "type": "group",
+  "children": [...],
+
+  "transforms": [
+    {"type": "translate", "x": 50, "y": 30},
+    {"type": "rotate", "angle": 0.785},
+    {"type": "scale", "x": 2.0, "y": 2.0}
+  ],
+  "clip": {"x": 0, "y": 0, "w": 200, "h": 200},
+
+  "id": "star-0",
+  "on_click": true,
+  "on_hover": true,
+  "cursor": "pointer",
+  "tooltip": "1 star",
+  "hit_rect": {"x": 0, "y": 0, "w": 40, "h": 40},
+
+  "hover_style": {"fill": "#ddd"},
+  "pressed_style": {"fill": "#bbb"},
+  "focus_style": {"stroke": "#3b82f6", "stroke_width": 2},
+  "show_focus_ring": true,
+
+  "draggable": false,
+  "drag_axis": "both",
+  "drag_bounds": {"min_x": 0, "max_x": 100, "min_y": 0, "max_y": 100},
+
+  "a11y": {"role": "radio", "label": "1 star", "selected": true,
+           "position_in_set": 1, "size_of_set": 5},
+
+  "focusable": false
+}
+```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | Yes | Unique identifier for this shape within the canvas |
-| `on_click` | bool | No | Emit `canvas_shape_click` events |
-| `on_hover` | bool | No | Emit `canvas_shape_enter` / `canvas_shape_leave` events |
-| `cursor` | string | No | Cursor to show on hover (`pointer`, `grab`, `crosshair`, `move`, `text`, etc.) |
-| `hover_style` | object | No | Style overrides applied while the cursor is over the shape |
-| `pressed_style` | object | No | Style overrides applied while a mouse button is held on the shape |
-| `tooltip` | string | No | Text shown as a tooltip on hover |
+| `type` | `"group"` | Yes | Must be `"group"` |
+| `children` | array | Yes | Child shapes drawn in local coordinates |
+| `transforms` | array | No | Ordered list of transforms: `translate`, `rotate`, `scale` |
+| `clip` | object | No | Clip rectangle `{x, y, w, h}` in local coordinates |
+| `id` | string | No* | Unique ID. Presence makes the group interactive. |
+| `on_click` | bool | No | Emit `canvas_element_click` events |
+| `on_hover` | bool | No | Emit `canvas_element_enter` / `canvas_element_leave` events |
+| `cursor` | string | No | Cursor on hover (`pointer`, `grab`, `crosshair`, `move`, `text`) |
+| `tooltip` | string | No | Tooltip text on hover |
+| `hit_rect` | object | No | Explicit hit region `{x, y, w, h}` in local coords |
+| `hover_style` | object | No | Style overrides while hovered |
+| `pressed_style` | object | No | Style overrides while pressed |
+| `focus_style` | object | No | Style overrides while keyboard-focused |
+| `show_focus_ring` | bool | No | Show default focus ring (default: `true`) |
 | `draggable` | bool | No | Enable drag interaction |
-| `drag_axis` | string | No | Constrain drag direction: `"both"` (default), `"x"`, `"y"` |
-| `drag_bounds` | object | No | Clamp drag position: `{min_x, max_x, min_y, max_y}` |
-| `hit_rect` | object | No | Explicit rectangular hit region: `{x, y, w, h}` |
+| `drag_axis` | string | No | `"both"` (default), `"x"`, `"y"` |
+| `drag_bounds` | object | No | `{min_x, max_x, min_y, max_y}` |
 | `a11y` | object | No | Accessibility overrides (see Accessibility below) |
+| `focusable` | bool | No | Make this group a Tab stop for two-level navigation |
 
-**Example -- bar chart with clickable bars:**
+\* Groups without `id` are non-interactive (pure structural containers
+for transforms, clips, and visual grouping).
 
-```json
-{
-  "type": "rect", "x": 10, "y": 50, "w": 30, "h": 200, "fill": "#3498db",
-  "interactive": {
-    "id": "bar-jan",
-    "on_click": true,
-    "on_hover": true,
-    "cursor": "pointer",
-    "hover_style": {"fill": "#2980b9"},
-    "tooltip": "January: 200 units",
-    "a11y": {"role": "button", "label": "January: 200 units"}
-  }
-}
-```
+**Transforms** are applied in array order. Each entry has a `type` and
+type-specific fields:
 
-### Shape groups
+| Transform | Fields | Description |
+|-----------|--------|-------------|
+| `translate` | `x`, `y` | Translate by (x, y) |
+| `rotate` | `angle` | Rotate by angle in radians |
+| `scale` | `x`, `y` or `factor` | Non-uniform or uniform scale |
 
-Groups wrap one or more shapes into a single interactive unit. To make
-any shape interactive (clickable, hoverable, draggable), wrap it in a
-group with the `interactive` field. The group computes its hit region
-automatically from its children's bounding boxes -- this works for all
-shape types including paths.
+Groups without transforms or clips are pure nesting containers with
+no rendering overhead.
 
-```json
-{
-  "type": "group",
-  "x": 50, "y": 100,
-  "interactive": {
-    "id": "data-point-1",
-    "on_click": true,
-    "tooltip": "Q1: 42 units"
-  },
-  "children": [
-    {"type": "circle", "x": 0, "y": 0, "r": 8, "fill": "#3498db"},
-    {"type": "text", "x": 12, "y": 4, "content": "42", "size": 12}
-  ]
-}
-```
+### Canvas widget props
 
-A group with a single child works too -- this is how you make an
-individual path or shape interactive:
-
-```json
-{
-  "type": "group",
-  "x": 100, "y": 50,
-  "interactive": {"id": "star", "on_click": true},
-  "children": [
-    {"type": "path", "commands": [["move_to", 0, -12], ...], "fill": "#f59e0b"}
-  ]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `x`, `y` | number | Translation offset applied to all children |
-| `interactive` | object | Same fields as any other interactive shape |
-| `children` | array | Child shapes drawn in local coordinates |
-
-Children use local coordinates relative to the group origin; `x`/`y`
-on the group is a translation applied before drawing. Nested groups
-work recursively -- each level adds its own translation.
-
-**Hit region.** The group's bounding box is computed automatically
-from its children. Shape types with computable bounds: `rect`,
-`circle`, `line`, `text`, `path`, `image`, `svg`, and nested `group`.
-If the children contain only shapes without automatic bounds (clips,
-transforms), provide an explicit `hit_rect` on the `interactive`
-object. For groups, `hit_rect` is relative to the group's origin
-(offset by the group's x/y position automatically).
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `role` | string | `"group"` if interactive elements exist, `"image"` otherwise | Accessible role for the canvas widget |
+| `arrow_mode` | string | `"wrap"` | Arrow key behavior: `"wrap"`, `"clamp"`, `"linear"`, `"none"` |
+| `alt` | string | - | Accessible label |
+| `description` | string | - | Extended accessible description |
 
 ### Hit testing
 
-The renderer infers hit regions automatically for common shape types:
+Hit regions are computed in the group's **local** coordinate space.
+The renderer accumulates a 2D affine transform matrix from all
+ancestor groups and uses the inverse matrix to transform cursor
+positions from canvas space to local space for testing.
 
-| Shape | Hit test method |
-|-------|----------------|
+| Children | Hit test method |
+|----------|----------------|
 | `rect` | Point-in-rect |
 | `circle` | Distance from center <= radius |
-| `line` | Distance to line segment (minimum 2px half-width for usability) |
-| `path` | Bounding box of path command coordinates |
-| `group` | Bounding box of children (see Shape groups above) |
-| Other shapes | No automatic inference -- use `hit_rect` for an explicit rectangular hit region |
+| `line` | Distance to line segment (min 2px half-width) |
+| `path` | Bounding box of command coordinates |
+| `text` | Estimated bounds from position + content |
+| `group` | Union bounding box of children |
 
-Shapes are tested in reverse draw order (topmost shape first), so
-shapes drawn later take priority.
+Groups are tested in reverse draw order (topmost first). Explicit
+`hit_rect` overrides automatic inference. `hit_rect` is in local
+coordinates.
 
-**Transforms are not applied to hit regions.** Layer-level transforms
-(translate, rotate, scale) do not affect hit testing. Interactive
-shapes should use absolute coordinates that match their on-screen
-position. (Group-level `x`/`y` translation is an exception -- it is
-accounted for in the bounding box calculation.)
+Clip regions from ancestor groups are intersected and tested in
+canvas space before the hit region test. Clicks outside the
+accumulated clip are ignored.
+
+A 0.5px epsilon is applied to boundary comparisons for floating-point
+precision at transformed element boundaries.
 
 ### Events emitted
 
-Interactive shapes emit the following event families. The `id` field
-on the outgoing event is the canvas node ID.
+Interactive elements emit the following event families. The top-level
+`id` field is the canvas widget ID; element identity is in `data`.
 
-| Family | Data fields | Description |
-|--------|-------------|-------------|
-| `canvas_shape_enter` | `shape_id`, `x`, `y` | Cursor entered the shape's hit region |
-| `canvas_shape_leave` | `shape_id` | Cursor left the shape's hit region |
-| `canvas_shape_click` | `shape_id`, `x`, `y`, `button` | Click on an interactive shape. `button` is `"keyboard"` when activated via Enter/Space. |
-| `canvas_shape_drag` | `shape_id`, `x`, `y`, `delta_x`, `delta_y` | Drag movement (rate-limited, CoalesceHint::Replace) |
-| `canvas_shape_drag_end` | `shape_id`, `x`, `y` | Mouse released after a drag |
-| `canvas_shape_focused` | `shape_id` | Keyboard focus moved to this element (not coalescable) |
+| Family | Data | Coalescable | Description |
+|--------|------|-------------|-------------|
+| `canvas_element_enter` | `element_id`, `x`, `y` | No | Cursor entered hit region |
+| `canvas_element_leave` | `element_id` | No | Cursor left hit region |
+| `canvas_element_click` | `element_id`, `x`, `y`, `button` | No | Activated (click or keyboard). `button`: `"left"`, `"right"`, `"keyboard"` |
+| `canvas_element_drag` | `element_id`, `x`, `y`, `delta_x`, `delta_y` | Replace | Drag movement |
+| `canvas_element_drag_end` | `element_id`, `x`, `y` | No | Drag released |
+| `canvas_element_focused` | `element_id` | No | Element gained keyboard focus |
+| `canvas_element_blurred` | `element_id` | No | Element lost keyboard focus |
+| `canvas_focused` | - | No | Canvas widget gained iced-level focus |
+| `canvas_blurred` | - | No | Canvas widget lost iced-level focus |
+| `canvas_group_focused` | `group_id` | No | Focusable group entered |
+| `canvas_group_blurred` | `group_id` | No | Focusable group exited |
+| `diagnostic` | `level`, `element_id`, `code`, `message` | Deduplicate | Validation warning |
 
-Raw canvas events (`canvas_move`, `canvas_press`, `canvas_release`,
-`canvas_scroll`) continue to fire alongside shape events.
+**Event ordering guarantees:**
+
+- Click on element: `canvas_focused` (if new) -> `canvas_element_blurred` (old) -> `canvas_element_focused` (new) -> `canvas_element_click`
+- Tab to next: `canvas_element_blurred` (old) -> `canvas_element_focused` (new)
+- Tab out: `canvas_element_blurred` -> `canvas_blurred`
+- Tab in: `canvas_focused` -> `canvas_element_focused`
+
+Raw canvas events (`canvas_press`, `canvas_release`, `canvas_move`,
+`canvas_scroll`) continue to fire alongside element events.
 
 ### Keyboard navigation
 
-A canvas with interactive shapes participates in iced's focus system
-as a single Tab stop. Once the canvas is focused, keyboard navigation
-moves between interactive shapes internally.
+A canvas with interactive elements is a single Tab stop. Once focused,
+internal keyboard navigation uses the roving tabindex pattern.
 
 | Key | Action |
 |-----|--------|
-| Tab | Enter canvas (focus first shape), or advance to next shape, or exit canvas (after last shape) |
-| Shift+Tab | Enter canvas (focus last shape), or move to previous shape, or exit canvas (before first shape) |
-| Arrow Down / Arrow Right | Move to next shape (wraps from last to first) |
-| Arrow Up / Arrow Left | Move to previous shape (wraps from first to last) |
-| Home | Focus first interactive shape |
-| End | Focus last interactive shape |
-| Page Down | Jump forward by 10 shapes (clamped to last) |
-| Page Up | Jump backward by 10 shapes (clamped to first) |
-| Enter / Space | Activate the focused shape's `on_click` handler. Emits `canvas_shape_click` with coordinates at the hit region center and `button` set to `"keyboard"`. |
-| Escape | Clear internal shape focus (canvas remains focused in iced). If no shape was focused, Escape propagates normally. |
+| Tab | Enter canvas (first element) / advance to next top-level entry / exit canvas |
+| Shift+Tab | Enter canvas (last element) / move to previous top-level entry / exit canvas |
+| Arrow Down/Right | Next element within current scope (respects `arrow_mode`) |
+| Arrow Up/Left | Previous element within current scope |
+| Home | First element in scope |
+| End | Last element in scope |
+| Page Down/Up | Jump by 10 within scope |
+| Enter / Space | Activate focused element (`canvas_element_click` with `button: "keyboard"`) |
+| Escape | Exit focusable group / clear focus / unfocus canvas (three levels) |
 
-Each focus change emits a `canvas_shape_focused` event.
+**Arrow mode** (`arrow_mode` canvas prop):
+
+| Mode | Boundary behavior |
+|------|-------------------|
+| `wrap` (default) | Wraps last->first and first->last. Always captures. |
+| `clamp` | Stops at first/last. Captures. |
+| `linear` | Propagates at boundaries (e.g. scrollable parent handles it). |
+| `none` | Arrows not handled. Tab-only navigation. |
+
+**Focusable groups** (`focusable: true` on a group): Tab moves between
+top-level entries (standalone elements + focusable groups). When Tab
+lands on a focusable group, it auto-enters and focuses the first (or
+last for Shift+Tab) child. Arrows navigate within the group's children.
+Escape exits the group. Canvases without focusable groups use flat-list
+navigation (backward compatible).
+
+Click-to-focus: clicking an interactive element grants the canvas
+iced-level focus and sets internal focus to the clicked element.
+Clicking empty canvas area clears internal focus.
+
+### Widget operations
+
+| Op | Payload | Description |
+|----|---------|-------------|
+| `focus_element` | `target` (canvas ID), `element_id` | Focus the canvas and set internal focus to the specified element |
+
+### Test interact actions
+
+| Action | Payload | Description |
+|--------|---------|-------------|
+| `click_element` | `x`, `y` | Synthesize click at coordinates |
+| `focus_element` | - | Synthesize Tab to enter canvas |
 
 ### Style overrides
 
-`hover_style` and `pressed_style` objects are merged into the shape's
-JSON during draw. Any shape property can be overridden (`fill`,
-`stroke`, `stroke_width`, `opacity`, etc.). When both apply,
-`pressed_style` takes priority over `hover_style`.
+`hover_style`, `pressed_style`, and `focus_style` on the group are
+merged into each child shape's JSON during draw. Any shape property
+can be overridden (`fill`, `stroke`, `stroke_width`, `opacity`, etc.).
 
-Layers with an active style override (hover or press) bypass the
-geometry cache so that visual feedback is immediate.
+Priority (highest wins): `pressed_style` > `hover_style` > `focus_style`.
 
-For groups, child shapes can carry their own `hover_style` and
-`pressed_style` at the top level of the child shape JSON. When the
-group is hovered or pressed, the renderer applies each child's
-overrides individually.
+Children can also declare their own per-child overrides at the top
+level of the child shape JSON; these take precedence over the group's
+style.
+
+Layers with an active style override bypass the geometry cache.
 
 ### Accessibility
 
-Interactive shapes with an `a11y` object appear as focusable child
-nodes in the accessibility tree, nested under the canvas widget's
-`Image` role.
+The canvas widget's accessible role defaults to `Group` when
+interactive elements exist, `Image` otherwise. Override with the
+`role` prop.
 
-The `a11y` field uses the same `A11yOverrides` structure as all other
-widgets in plushie. All standard fields are supported: `role`, `label`,
-`description`, `disabled`, `selected`, `expanded`, `toggled`, `value`,
-`orientation`, `position_in_set`, `size_of_set`, `hidden`, `required`,
-`live`, `busy`, `invalid`, `modal`, `read_only`, `mnemonic`,
-`has_popup`, `labelled_by`, `described_by`, `error_message`.
+Interactive elements with `a11y` appear as child nodes in the
+accessibility tree. `active_descendant` on the canvas node
+dynamically tracks the focused element.
 
-Supported roles include (among others): `button`, `link`, `slider`,
-`image`, `radio`, `checkbox`, `toolbar`, `list`, `tablist`, `tree`,
-`menu`, `menubar`, `tab`, `treeitem`, `listitem`. The full set of
-recognized role strings is the same as for regular widget nodes (see
-Accessibility props above).
+Focusable groups create parent-child relationships in the a11y tree
+via `traverse()` blocks.
+
+The renderer emits validation diagnostics (as log warnings) for:
+- Interactive element without `a11y` metadata
+- `switch` role without `toggled`, `radio` without `selected`,
+  `check_box` without `toggled`
+- Multiple elements without `position_in_set`/`size_of_set`
+
+### Focus ring
+
+The focus ring adapts to the element's hit region geometry:
+- **Rect**: rounded rectangle
+- **Circle**: circle
+- **Line**: capsule (stadium shape) oriented along the line
+
+The ring respects the element's full accumulated transform (translate,
+rotate, scale). Suppressed when `show_focus_ring: false` is set (use
+`focus_style` for custom focus indicators instead).
 
 ### Tooltips
 
-When the cursor hovers over a shape with a `tooltip` field, the text
-is drawn as an overlay within the canvas. The tooltip is not clipped
-to the canvas bounds.
-
-### Theme integration
-
-The keyboard focus ring is drawn using the theme's primary color
-(2px stroke, 3px corner radius). Tooltip rendering also uses theme
-colors for background and text.
+When the cursor hovers over an element with a `tooltip` field, the
+text is drawn as an overlay within the canvas.
 
 ### Known limitations
 
-- Arrow keys always use flat sequential navigation regardless of the
-  shape's a11y role. Role-specific patterns (e.g. value adjustment
-  for sliders, tree expand/collapse) are not implemented.
-- Layer-level transforms (rotate, scale) are not applied to hit
-  testing. Group `x`/`y` translation is the exception.
-- Hover and pressed style overrides are not applied to shapes inside
-  `push_clip` regions (clipped shapes fall back to normal drawing).
-- The a11y tree for canvas shapes is flat -- nested group hierarchy
-  is not reflected in the accessibility tree structure.
+- Keyboard-driven drag not yet supported (drag operations have no
+  keyboard equivalent).
+- Nested focusable groups (focusable inside focusable) are not fully
+  supported -- the inner group appears as an arrow-navigable child but
+  cannot be "drilled into" via keyboard.
+- Role-specific keyboard patterns (slider value adjustment, tree
+  expand/collapse) are not implemented.
 - The overlay widget auto-flips when `flip: true` is set, but only
-  along the primary axis. It does not flip the cross-axis alignment.
+  along the primary axis.
