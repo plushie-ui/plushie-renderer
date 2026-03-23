@@ -81,16 +81,19 @@ pub(crate) struct DragBounds {
 
 /// Parsed interactive configuration for a canvas element.
 ///
-/// Extracted from the `"interactive"` field on shape JSON during
-/// `ensure_caches`. Stored in `WidgetCaches` so `update()` can hit-test
-/// without re-parsing JSON every frame.
+/// An "element" is a group with an `id` field. Interactive fields
+/// (`on_click`, `on_hover`, `a11y`, etc.) live at the top level of
+/// the group JSON, not in a nested `"interactive"` sub-object.
+///
+/// Extracted during `ensure_canvas_cache` and stored in `WidgetCaches`
+/// so `update()` can hit-test without re-parsing JSON every frame.
 #[derive(Debug, Clone)]
 pub(crate) struct InteractiveElement {
-    /// Unique ID for this element (from `interactive.id`).
+    /// Unique ID for this element (from the group's `"id"` field).
     pub id: String,
-    /// Which layer this shape belongs to.
+    /// Which layer this element belongs to.
     pub layer: String,
-    /// Geometric bounds for hit testing.
+    /// Geometric bounds for hit testing (in local coordinates).
     pub hit_region: HitRegion,
     pub on_click: bool,
     pub on_hover: bool,
@@ -99,15 +102,24 @@ pub(crate) struct InteractiveElement {
     pub drag_bounds: Option<DragBounds>,
     /// Cursor to show when hovering (e.g. "pointer", "grab").
     pub cursor: Option<String>,
-    /// Whether this shape has hover/pressed style overrides.
+    /// Whether this element has hover/pressed/focus style overrides.
     pub has_hover_style: bool,
     pub has_pressed_style: bool,
+    pub has_focus_style: bool,
+    /// Whether to show the default focus ring when this element is focused.
+    /// Defaults to `true`. Set to `false` when using `focus_style` instead.
+    pub show_focus_ring: bool,
+    /// Whether this group acts as a Tab stop for two-level navigation.
+    /// When true, Tab navigates between focusable groups, and arrows
+    /// navigate between elements within the focused group.
+    pub focusable: bool,
     /// Tooltip text to show on hover.
     pub tooltip: Option<String>,
-    /// Accessibility overrides for this element. Parsed from the
-    /// `a11y` sub-field of `interactive` using the same
-    /// [`A11yOverrides`](super::a11y::A11yOverrides) struct that all
-    /// other widgets use -- same fields, same parsing, same validation.
+    /// Accessibility overrides for this element. Parsed from the `a11y`
+    /// field on the group using the same [`A11yOverrides`] struct that
+    /// all other widgets use -- same fields, same parsing, same validation.
+    ///
+    /// [`A11yOverrides`]: super::a11y::A11yOverrides
     pub a11y: Option<super::a11y::A11yOverrides>,
 }
 
@@ -166,57 +178,60 @@ fn find_hit_element(point: Point, elements: &[InteractiveElement]) -> Option<&In
         .find(|e| (e.on_click || e.on_hover || e.draggable) && hit_test(point, &e.hit_region))
 }
 
-/// Parse an [`InteractiveElement`] from a group's JSON `"interactive"` field.
+/// Parse an [`InteractiveElement`] from a group's top-level JSON fields.
 ///
-/// Returns `None` if the interactive field is missing or has no `id`.
-fn parse_interactive_element(shape: &Value, layer_name: &str) -> Option<InteractiveElement> {
-    let interactive = shape.get("interactive")?.as_object()?;
-    let id = interactive.get("id")?.as_str()?.to_string();
+/// A group is interactive when it has an `"id"` field. All interactive
+/// properties (`on_click`, `a11y`, `hover_style`, etc.) live at the
+/// group's top level, not in a nested `"interactive"` sub-object.
+///
+/// Returns `None` if the group has no `"id"` or is not a group type.
+fn parse_interactive_element(group: &Value, layer_name: &str) -> Option<InteractiveElement> {
+    // Only groups can be interactive elements.
+    let shape_type = group.get("type").and_then(|v| v.as_str())?;
+    if shape_type != "group" {
+        return None;
+    }
+
+    let id = group.get("id").and_then(|v| v.as_str())?.to_string();
     if id.is_empty() {
         return None;
     }
 
-    // Validate known fields -- warn on typos like "on_clck".
-    const KNOWN_INTERACTIVE_FIELDS: &[&str] = &[
-        "id",
-        "on_click",
-        "on_hover",
-        "cursor",
-        "draggable",
-        "drag_axis",
-        "drag_bounds",
-        "tooltip",
+    // Validate known fields -- warn on typos like "on_clck" or "focussable".
+    const KNOWN_GROUP_FIELDS: &[&str] = &[
+        "type", "children", "transforms", "clip",
+        // Interactive
+        "id", "on_click", "on_hover", "cursor", "draggable", "drag_axis",
+        "drag_bounds", "tooltip", "hit_rect", "hover_style", "pressed_style",
+        "focus_style", "show_focus_ring", "focusable",
+        // Accessibility
         "a11y",
-        "hit_rect",
-        "hover_style",
-        "pressed_style",
     ];
-    for key in interactive.keys() {
-        if !KNOWN_INTERACTIVE_FIELDS.contains(&key.as_str()) {
-            log::warn!(
-                "canvas shape '{id}': unknown interactive field '{key}' \
-                 (known: id, on_click, on_hover, cursor, draggable, \
-                 drag_axis, drag_bounds, tooltip, a11y, hit_rect, \
-                 hover_style, pressed_style)"
-            );
+    if let Some(obj) = group.as_object() {
+        for key in obj.keys() {
+            if !KNOWN_GROUP_FIELDS.contains(&key.as_str()) {
+                log::warn!(
+                    "canvas element '{id}': unknown field '{key}'"
+                );
+            }
         }
     }
 
     // Warn on common mistakes.
-    let draggable = interactive
+    let draggable = group
         .get("draggable")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    if !draggable && interactive.contains_key("drag_bounds") {
-        log::warn!("canvas shape '{id}': drag_bounds set without draggable: true");
+    if !draggable && group.get("drag_bounds").is_some() {
+        log::warn!("canvas element '{id}': drag_bounds set without draggable: true");
     }
-    if !draggable && interactive.contains_key("drag_axis") {
-        log::warn!("canvas shape '{id}': drag_axis set without draggable: true");
+    if !draggable && group.get("drag_axis").is_some() {
+        log::warn!("canvas element '{id}': drag_axis set without draggable: true");
     }
 
-    let hit_region = compute_hit_region(shape, interactive)?;
+    let hit_region = compute_hit_region(group)?;
 
-    let drag_axis = match interactive
+    let drag_axis = match group
         .get("drag_axis")
         .and_then(|v| v.as_str())
         .unwrap_or("both")
@@ -226,12 +241,12 @@ fn parse_interactive_element(shape: &Value, layer_name: &str) -> Option<Interact
         _ => DragAxis::Both,
     };
 
-    let drag_bounds = interactive.get("drag_bounds").and_then(|v| {
+    let drag_bounds = group.get("drag_bounds").and_then(|v| {
         let obj = v.as_object()?;
         let get = |key: &str| -> Option<f32> {
             let val = obj.get(key).and_then(|v| v.as_f64()).map(|v| v as f32);
             if val.is_none() {
-                log::warn!("canvas shape '{id}': drag_bounds missing '{key}'");
+                log::warn!("canvas element '{id}': drag_bounds missing '{key}'");
             }
             val
         };
@@ -239,7 +254,6 @@ fn parse_interactive_element(shape: &Value, layer_name: &str) -> Option<Interact
         let max_x = get("max_x")?;
         let min_y = get("min_y")?;
         let max_y = get("max_y")?;
-        // Ensure min <= max to avoid panic from f32::clamp in debug.
         Some(DragBounds {
             min_x: min_x.min(max_x),
             max_x: min_x.max(max_x),
@@ -248,7 +262,7 @@ fn parse_interactive_element(shape: &Value, layer_name: &str) -> Option<Interact
         })
     });
 
-    let cursor = interactive
+    let cursor = group
         .get("cursor")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
@@ -257,31 +271,123 @@ fn parse_interactive_element(shape: &Value, layer_name: &str) -> Option<Interact
         id,
         layer: layer_name.to_string(),
         hit_region,
-        on_click: interactive
+        on_click: group
             .get("on_click")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
-        on_hover: interactive
+        on_hover: group
             .get("on_hover")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
-        draggable: interactive
-            .get("draggable")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+        draggable,
         drag_axis,
         drag_bounds,
         cursor,
-        has_hover_style: interactive.get("hover_style").is_some(),
-        has_pressed_style: interactive.get("pressed_style").is_some(),
-        tooltip: interactive
+        has_hover_style: group.get("hover_style").is_some(),
+        has_pressed_style: group.get("pressed_style").is_some(),
+        has_focus_style: group.get("focus_style").is_some(),
+        show_focus_ring: group
+            .get("show_focus_ring")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        focusable: group
+            .get("focusable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        tooltip: group
             .get("tooltip")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        a11y: interactive
+        a11y: group
             .get("a11y")
             .and_then(super::a11y::A11yOverrides::from_a11y_value),
     })
+}
+
+/// Extract the net translation from a group's `"transforms"` array.
+///
+/// Scans for `{"type": "translate", "x": ..., "y": ...}` entries and
+/// sums their x/y components. Non-translate transforms (rotate, scale)
+/// are ignored for this purpose -- they affect hit testing via the
+/// transform matrix in Phase 2.5, not via this simple offset.
+fn group_translation(group: &Value) -> (f32, f32) {
+    let transforms = match group.get("transforms").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return (0.0, 0.0),
+    };
+    let mut tx = 0.0f32;
+    let mut ty = 0.0f32;
+    for t in transforms {
+        if t.get("type").and_then(|v| v.as_str()) == Some("translate") {
+            tx += t.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            ty += t.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        }
+    }
+    (tx, ty)
+}
+
+/// Apply a group's transforms to the drawing frame.
+///
+/// Reads the `"transforms"` array and applies each entry in order.
+/// Supported transform types: `translate`, `rotate`, `scale`.
+/// The caller is responsible for calling `frame.push_transform()` before
+/// and `frame.pop_transform()` after this function.
+fn apply_group_transforms(frame: &mut canvas::Frame, group: &Value) {
+    let transforms = match group.get("transforms").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return,
+    };
+    for t in transforms {
+        let t_type = t.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match t_type {
+            "translate" => {
+                let x = t.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                let y = t.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                frame.translate(Vector::new(x, y));
+            }
+            "rotate" => {
+                let angle = t.get("angle").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                frame.rotate(Radians(angle));
+            }
+            "scale" => {
+                if let Some(factor) = t.get("factor").and_then(|v| v.as_f64()) {
+                    frame.scale(factor as f32);
+                } else {
+                    let x = t.get("x").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+                    let y = t.get("y").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+                    frame.scale_nonuniform(Vector::new(x, y));
+                }
+            }
+            _ => {
+                log::warn!("canvas group: unknown transform type '{t_type}'");
+            }
+        }
+    }
+}
+
+/// Apply a group's clip region to the frame, drawing children inside.
+///
+/// If the group has a `"clip"` field with `{x, y, w, h}`, children are
+/// drawn clipped to that rectangle. Otherwise children are drawn directly.
+fn draw_with_group_clip(
+    frame: &mut canvas::Frame,
+    group: &Value,
+    images: &crate::image_registry::ImageRegistry,
+    children: &[&Value],
+    draw_fn: impl FnOnce(&mut canvas::Frame, &[&Value], &crate::image_registry::ImageRegistry),
+) {
+    if let Some(clip) = group.get("clip").and_then(|v| v.as_object()) {
+        let x = clip.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        let y = clip.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        let w = clip.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        let h = clip.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        let clip_rect = iced::Rectangle { x, y, width: w, height: h };
+        frame.with_clip(clip_rect, |f| {
+            draw_fn(f, children, images);
+        });
+    } else {
+        draw_fn(frame, children, images);
+    }
 }
 
 /// Compute the bounding box of a single shape in its parent's coordinate
@@ -326,15 +432,14 @@ fn child_bounds(child: &Value) -> Option<(f32, f32, f32, f32)> {
             Some((x, y, x + w, y + h))
         }
         "group" => {
-            let gx = json_f32(child, "x");
-            let gy = json_f32(child, "y");
+            let (gx, gy) = group_translation(child);
             let nested = child.get("children").and_then(|v| v.as_array())?;
             let (min_x, min_y, max_x, max_y) = children_bounds(nested)?;
             Some((gx + min_x, gy + min_y, gx + max_x, gy + max_y))
         }
         "path" => path_bounds(child),
-        // Transforms, clips, and other types can't have their
-        // bounds automatically determined. Use hit_rect on the parent.
+        // Other shape types can't have their bounds automatically
+        // determined. Use hit_rect on the parent group.
         _ => None,
     }
 }
@@ -397,100 +502,33 @@ fn children_bounds(children: &[Value]) -> Option<(f32, f32, f32, f32)> {
     has_bounds.then_some((min_x, min_y, max_x, max_y))
 }
 
-/// Compute the hit region from a shape's geometry.
-fn compute_hit_region(
-    shape: &Value,
-    interactive: &serde_json::Map<String, Value>,
-) -> Option<HitRegion> {
+/// Compute the hit region for a group from its children's geometry.
+///
+/// Hit regions are in **local** coordinates (before transforms are applied).
+/// Transform matrices are composed separately during hit testing.
+///
+/// An explicit `hit_rect` on the group overrides automatic inference.
+/// `hit_rect` is in the group's local coordinate space.
+fn compute_hit_region(group: &Value) -> Option<HitRegion> {
     // Explicit hit_rect overrides geometric inference.
-    // For groups, the hit_rect is relative to the group's origin,
-    // so we offset by the group's x/y position.
-    if let Some(hr) = interactive.get("hit_rect").and_then(|v| v.as_object()) {
-        let mut x = hr.get("x")?.as_f64()? as f32;
-        let mut y = hr.get("y")?.as_f64()? as f32;
+    // hit_rect is in local coordinates -- no offset needed.
+    if let Some(hr) = group.get("hit_rect").and_then(|v| v.as_object()) {
+        let x = hr.get("x")?.as_f64()? as f32;
+        let y = hr.get("y")?.as_f64()? as f32;
         let w = hr.get("w").or(hr.get("width"))?.as_f64()? as f32;
         let h = hr.get("h").or(hr.get("height"))?.as_f64()? as f32;
-        let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if shape_type == "group" {
-            x += json_f32(shape, "x");
-            y += json_f32(shape, "y");
-        }
         return Some(HitRegion::Rect { x, y, w, h });
     }
 
-    let shape_type = shape.get("type").and_then(|v| v.as_str())?;
-    match shape_type {
-        "rect" => {
-            let x = json_f32(shape, "x");
-            let y = json_f32(shape, "y");
-            let w = json_f32(shape, "w");
-            let h = json_f32(shape, "h");
-            Some(HitRegion::Rect { x, y, w, h })
-        }
-        "circle" => {
-            let cx = json_f32(shape, "x");
-            let cy = json_f32(shape, "y");
-            let r = json_f32(shape, "r");
-            Some(HitRegion::Circle { cx, cy, r })
-        }
-        "line" => {
-            let x1 = json_f32(shape, "x1");
-            let y1 = json_f32(shape, "y1");
-            let x2 = json_f32(shape, "x2");
-            let y2 = json_f32(shape, "y2");
-            let stroke_width = shape
-                .get("stroke")
-                .and_then(|s| s.get("width"))
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0) as f32;
-            // Legacy: "width" at top level if no stroke object
-            let stroke_width = if stroke_width <= 1.0 {
-                shape
-                    .get("width")
-                    .and_then(|v| v.as_f64())
-                    .map(|v| v as f32)
-                    .unwrap_or(stroke_width)
-            } else {
-                stroke_width
-            };
-            let half_width = (stroke_width / 2.0).max(2.0); // min 2px for usability
-            Some(HitRegion::Line {
-                x1,
-                y1,
-                x2,
-                y2,
-                half_width,
-            })
-        }
-        "group" => {
-            let group_x = json_f32(shape, "x");
-            let group_y = json_f32(shape, "y");
-            let children = shape.get("children").and_then(|v| v.as_array());
-            if let Some(children) = children {
-                if let Some((min_x, min_y, max_x, max_y)) = children_bounds(children) {
-                    Some(HitRegion::Rect {
-                        x: min_x + group_x,
-                        y: min_y + group_y,
-                        w: max_x - min_x,
-                        h: max_y - min_y,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }
-        // For unsupported shape types, the host can provide an explicit
-        // hit_rect in the interactive field as a fallback.
-        _ => {
-            log::debug!(
-                "canvas: no geometric hit region for shape type '{shape_type}', \
-                 use interactive.hit_rect for hit testing"
-            );
-            None
-        }
-    }
+    // Infer from children's bounding box.
+    let children = group.get("children").and_then(|v| v.as_array())?;
+    let (min_x, min_y, max_x, max_y) = children_bounds(children)?;
+    Some(HitRegion::Rect {
+        x: min_x,
+        y: min_y,
+        w: max_x - min_x,
+        h: max_y - min_y,
+    })
 }
 
 /// Parse a cursor name string into an iced mouse interaction.
@@ -633,9 +671,13 @@ impl CanvasProgram<'_> {
         shape.tooltip.clone()
     }
 
-    /// Draw shapes with hover/pressed style overrides applied to the
-    /// active shape. Used when a layer needs fresh drawing due to
-    /// interaction state changes.
+    /// Draw shapes with hover/pressed/focus style overrides applied to the
+    /// active element. Used when a layer needs fresh drawing due to
+    /// interaction state changes (cache is bypassed).
+    ///
+    /// Only groups can be interactive elements. Non-group shapes are drawn
+    /// directly. When a group is the active element, its children have
+    /// per-child style overrides applied. Priority: pressed > hover > focus.
     fn draw_shapes_with_overrides(
         &self,
         frame: &mut canvas::Frame,
@@ -645,51 +687,31 @@ impl CanvasProgram<'_> {
     ) {
         let hovered = state.hovered_element.as_deref();
         let pressed = state.pressed_element.as_deref();
-        let mut i = 0;
-        while i < shapes.len() {
-            let shape = shapes[i];
-            let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match shape_type {
-                "push_clip" => {
-                    let x = shape.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let y = shape.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let w = shape.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let h = shape.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let (end_offset, clipped) = collect_clipped_shapes(&shapes[i + 1..]);
-                    let clip_rect = iced::Rectangle {
-                        x,
-                        y,
-                        width: w,
-                        height: h,
-                    };
-                    frame.with_clip(clip_rect, |f| {
-                        // For clipped regions, fall back to normal drawing.
-                        // Overrides on clipped shapes are a rare edge case.
-                        draw_canvas_shapes(f, &clipped, images);
-                    });
-                    i = i + 1 + end_offset + 1;
-                }
-                "pop_clip" => {
-                    i += 1;
-                }
-                "group" => {
-                    let gx = json_f32(shape, "x");
-                    let gy = json_f32(shape, "y");
-                    let group_id = shape
-                        .get("interactive")
-                        .and_then(|v| v.get("id"))
-                        .and_then(|v| v.as_str());
-                    let group_active =
-                        group_id.is_some_and(|sid| pressed == Some(sid) || hovered == Some(sid));
 
-                    if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
+        for &shape in shapes {
+            let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            if shape_type == "group" {
+                // Interactive ID is now at the group's top level.
+                let group_id = shape.get("id").and_then(|v| v.as_str());
+                let group_active =
+                    group_id.is_some_and(|gid| pressed == Some(gid) || hovered == Some(gid));
+
+                if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
+                    let has_transforms = shape.get("transforms")
+                        .and_then(|v| v.as_array())
+                        .is_some_and(|a| !a.is_empty());
+
+                    if has_transforms {
                         frame.push_transform();
-                        frame.translate(Vector::new(gx, gy));
+                        apply_group_transforms(frame, shape);
+                    }
+
+                    let draw_children = |f: &mut canvas::Frame, child_refs: &[&Value], img: &crate::image_registry::ImageRegistry| {
                         if group_active {
-                            let is_pressed = group_id.is_some_and(|sid| pressed == Some(sid));
-                            for child in children {
-                                // Each child can have its own hover_style/pressed_style
-                                // at the top level of the child shape JSON.
+                            let is_pressed = group_id.is_some_and(|gid| pressed == Some(gid));
+                            for &child in child_refs {
+                                // Per-child style overrides. Priority: pressed > hover > focus.
                                 let override_style = if is_pressed {
                                     child.get("pressed_style")
                                 } else {
@@ -699,50 +721,27 @@ impl CanvasProgram<'_> {
 
                                 if let Some(overrides) = override_style {
                                     let merged = merge_shape_style(child, overrides);
-                                    draw_canvas_shape(frame, &merged, images);
+                                    draw_canvas_shape(f, &merged, img);
                                 } else {
-                                    draw_canvas_shape(frame, child, images);
+                                    draw_canvas_shape(f, child, img);
                                 }
                             }
                         } else {
-                            let child_refs: Vec<&Value> = children.iter().collect();
-                            draw_canvas_shapes(frame, &child_refs, images);
+                            draw_canvas_shapes(f, child_refs, img);
                         }
+                    };
+
+                    let child_refs: Vec<&Value> = children.iter().collect();
+                    draw_with_group_clip(frame, shape, images, &child_refs, draw_children);
+
+                    if has_transforms {
                         frame.pop_transform();
                     }
-                    i += 1;
                 }
-                _ => {
-                    let element_id = shape
-                        .get("interactive")
-                        .and_then(|v| v.get("id"))
-                        .and_then(|v| v.as_str());
-
-                    let needs_override =
-                        element_id.is_some_and(|sid| pressed == Some(sid) || hovered == Some(sid));
-
-                    if needs_override {
-                        let sid = element_id.unwrap();
-                        let interactive = shape.get("interactive").unwrap();
-                        // Pressed style takes priority over hover style.
-                        let override_style = if pressed == Some(sid) {
-                            interactive.get("pressed_style")
-                        } else {
-                            None
-                        }
-                        .or_else(|| interactive.get("hover_style"));
-
-                        if let Some(overrides) = override_style {
-                            let merged = merge_shape_style(shape, overrides);
-                            draw_canvas_shape(frame, &merged, images);
-                        } else {
-                            draw_canvas_shape(frame, shape, images);
-                        }
-                    } else {
-                        draw_canvas_shape(frame, shape, images);
-                    }
-                    i += 1;
-                }
+            } else {
+                // Non-group shapes are never interactive elements in the
+                // new design. Draw them directly.
+                draw_canvas_shape(frame, shape, images);
             }
         }
     }
@@ -1101,75 +1100,29 @@ fn build_path_from_commands(commands: &[Value]) -> canvas::Path {
     })
 }
 
-/// Draw a sequence of shapes, handling push_clip/pop_clip nesting.
+/// Draw a sequence of shapes.
+///
+/// Clips and transforms are handled at the group level -- each group
+/// carries its own `"transforms"` and `"clip"` fields, applied in
+/// [`draw_canvas_shape`] when rendering the `"group"` type.
 fn draw_canvas_shapes(
     frame: &mut canvas::Frame,
     shapes: &[&Value],
     images: &crate::image_registry::ImageRegistry,
 ) {
-    let mut i = 0;
-    while i < shapes.len() {
-        let shape = shapes[i];
+    for &shape in shapes {
         let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match shape_type {
-            "push_clip" => {
-                let x = shape.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                let y = shape.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                let w = shape.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                let h = shape.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                let (end_offset, clipped) = collect_clipped_shapes(&shapes[i + 1..]);
-                let clip_rect = iced::Rectangle {
-                    x,
-                    y,
-                    width: w,
-                    height: h,
-                };
-                frame.with_clip(clip_rect, |f| {
-                    draw_canvas_shapes(f, &clipped, images);
-                });
-                // Skip past the matching pop_clip
-                i = i + 1 + end_offset + 1;
+            // Standalone clip commands are no longer supported.
+            "push_clip" | "pop_clip" => {
+                log::warn!(
+                    "canvas: standalone '{shape_type}' commands are no longer supported. \
+                     Use group clip instead."
+                );
             }
-            "pop_clip" => {
-                // Stray pop_clip at top level -- should not happen if properly paired.
-                log::warn!("canvas: pop_clip without matching push_clip");
-                i += 1;
-            }
-            _ => {
-                draw_canvas_shape(frame, shape, images);
-                i += 1;
-            }
+            _ => draw_canvas_shape(frame, shape, images),
         }
     }
-}
-
-/// Collect shapes between a push_clip and its matching pop_clip, respecting
-/// nesting. Returns (index_of_pop_clip_in_slice, collected_shapes).
-pub(crate) fn collect_clipped_shapes<'a>(shapes: &[&'a Value]) -> (usize, Vec<&'a Value>) {
-    let mut depth: usize = 0;
-    let mut result: Vec<&'a Value> = Vec::new();
-    for (i, &shape) in shapes.iter().enumerate() {
-        let t = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        match t {
-            "push_clip" => {
-                depth += 1;
-                result.push(shape);
-            }
-            "pop_clip" if depth == 0 => {
-                return (i, result);
-            }
-            "pop_clip" => {
-                depth -= 1;
-                result.push(shape);
-            }
-            _ => {
-                result.push(shape);
-            }
-        }
-    }
-    // No matching pop_clip found -- draw all remaining shapes anyway.
-    log::warn!("canvas: push_clip without matching pop_clip");
-    (shapes.len(), result)
 }
 
 /// Apply per-shape opacity to a `canvas::Fill`. Multiplies the opacity
@@ -1235,27 +1188,13 @@ fn draw_canvas_shape(
 ) {
     let shape_type = shape.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match shape_type {
-        // -- Transform commands --
-        "push_transform" => frame.push_transform(),
-        "pop_transform" => frame.pop_transform(),
-        "translate" => {
-            let x = json_f32(shape, "x");
-            let y = json_f32(shape, "y");
-            frame.translate(Vector::new(x, y));
-        }
-        "rotate" => {
-            let angle = json_f32(shape, "angle");
-            frame.rotate(Radians(angle));
-        }
-        "scale" => {
-            // Uniform scaling via "factor", or non-uniform via "x"/"y".
-            if let Some(factor) = shape.get("factor").and_then(|v| v.as_f64()) {
-                frame.scale(factor as f32);
-            } else {
-                let x = shape.get("x").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
-                let y = shape.get("y").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
-                frame.scale_nonuniform(Vector::new(x, y));
-            }
+        // Standalone transform/clip commands are no longer supported.
+        // Transforms and clips now live on groups via "transforms" and "clip" fields.
+        "push_transform" | "pop_transform" | "translate" | "rotate" | "scale" => {
+            log::warn!(
+                "canvas: standalone '{shape_type}' commands are no longer supported. \
+                 Use group transforms instead."
+            );
         }
         // -- Primitive shapes --
         "rect" => {
@@ -1443,14 +1382,26 @@ fn draw_canvas_shape(
             frame.draw_svg(bounds, &handle);
         }
         "group" => {
-            let x = json_f32(shape, "x");
-            let y = json_f32(shape, "y");
             if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
-                frame.push_transform();
-                frame.translate(Vector::new(x, y));
                 let child_refs: Vec<&Value> = children.iter().collect();
-                draw_canvas_shapes(frame, &child_refs, images);
-                frame.pop_transform();
+                let has_transforms = shape.get("transforms")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|a| !a.is_empty());
+
+                if has_transforms {
+                    frame.push_transform();
+                    apply_group_transforms(frame, shape);
+                }
+
+                // draw_with_group_clip handles the clip field (if present)
+                // using frame.with_clip, which manages its own scope.
+                draw_with_group_clip(frame, shape, images, &child_refs, |f, c, img| {
+                    draw_canvas_shapes(f, c, img);
+                });
+
+                if has_transforms {
+                    frame.pop_transform();
+                }
             }
         }
         _ => {}
@@ -2179,8 +2130,12 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 // ---------------------------------------------------------------------------
 
 /// Recursively collect interactive elements from a shape array, descending
-/// into groups. `offset_x`/`offset_y` accumulate group x/y translations
-/// so nested shapes' hit regions are in canvas-space coordinates.
+/// into groups. `offset_x`/`offset_y` accumulate group translations
+/// (extracted from the `"transforms"` array) so nested elements' hit
+/// regions are in canvas-space coordinates.
+///
+/// Only groups with an `"id"` field are collected as interactive elements.
+/// Non-group shapes are skipped regardless of any fields they carry.
 fn collect_interactive_elements(
     shapes: &[Value],
     layer_name: &str,
@@ -2189,22 +2144,33 @@ fn collect_interactive_elements(
     out: &mut Vec<InteractiveElement>,
 ) {
     for shape in shapes {
-        if let Some(mut ishape) = parse_interactive_element(shape, layer_name) {
-            // Apply accumulated group offset to the hit region.
-            if offset_x != 0.0 || offset_y != 0.0 {
-                ishape.hit_region = offset_hit_region(&ishape.hit_region, offset_x, offset_y);
-            }
-            out.push(ishape);
-        }
-        // Recurse into group children to find nested interactive elements.
         let is_group = shape
             .get("type")
             .and_then(|v| v.as_str())
             .is_some_and(|t| t == "group");
-        if is_group && let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
-            let gx = json_f32(shape, "x");
-            let gy = json_f32(shape, "y");
-            collect_interactive_elements(children, layer_name, offset_x + gx, offset_y + gy, out);
+
+        if !is_group {
+            continue;
+        }
+
+        // Collect this group if it's interactive (has an id).
+        if let Some(mut element) = parse_interactive_element(shape, layer_name) {
+            if offset_x != 0.0 || offset_y != 0.0 {
+                element.hit_region = offset_hit_region(&element.hit_region, offset_x, offset_y);
+            }
+            out.push(element);
+        }
+
+        // Recurse into group children to find nested interactive elements.
+        if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
+            let (gx, gy) = group_translation(shape);
+            collect_interactive_elements(
+                children,
+                layer_name,
+                offset_x + gx,
+                offset_y + gy,
+                out,
+            );
         }
     }
 }
@@ -2442,48 +2408,8 @@ mod tests {
         assert_eq!(fill.rule, canvas::fill::Rule::NonZero);
     }
 
-    #[test]
-    fn collect_clipped_shapes_simple() {
-        let shapes = [
-            json!({"type": "rect", "x": 0, "y": 0, "w": 50, "h": 50}),
-            json!({"type": "pop_clip"}),
-        ];
-        let refs: Vec<&Value> = shapes.iter().collect();
-        let (end_idx, collected) = collect_clipped_shapes(&refs);
-        assert_eq!(end_idx, 1); // pop_clip is at index 1
-        assert_eq!(collected.len(), 1); // just the rect
-        assert_eq!(
-            collected[0].get("type").and_then(|v| v.as_str()),
-            Some("rect")
-        );
-    }
-
-    #[test]
-    fn collect_clipped_shapes_nested() {
-        let shapes = [
-            json!({"type": "push_clip", "x": 10, "y": 10, "w": 50, "h": 50}),
-            json!({"type": "rect", "x": 0, "y": 0, "w": 20, "h": 20}),
-            json!({"type": "pop_clip"}),
-            json!({"type": "circle", "x": 25, "y": 25, "r": 10}),
-            json!({"type": "pop_clip"}),
-        ];
-        let refs: Vec<&Value> = shapes.iter().collect();
-        let (end_idx, collected) = collect_clipped_shapes(&refs);
-        // The outer pop_clip is at index 4
-        assert_eq!(end_idx, 4);
-        // Collected: push_clip, rect, pop_clip (inner), circle
-        assert_eq!(collected.len(), 4);
-    }
-
-    #[test]
-    fn collect_clipped_shapes_no_pop() {
-        let shapes = [json!({"type": "rect", "x": 0, "y": 0, "w": 50, "h": 50})];
-        let refs: Vec<&Value> = shapes.iter().collect();
-        let (end_idx, collected) = collect_clipped_shapes(&refs);
-        // No pop_clip found -- returns all shapes
-        assert_eq!(end_idx, shapes.len());
-        assert_eq!(collected.len(), 1);
-    }
+    // Standalone clip tests removed -- clips are now a group-level field.
+    // See draw_with_group_clip() and the "clip" field on group JSON.
 
     // -- Text alignment tests --
 
@@ -2676,18 +2602,17 @@ mod tests {
     // -- Interactive shape parsing --
 
     #[test]
-    fn parse_interactive_rect() {
+    fn parse_interactive_group_basic() {
         let shape = json!({
-            "type": "rect",
-            "x": 10, "y": 20, "w": 30, "h": 40,
-            "fill": "#ff0000",
-            "interactive": {
-                "id": "bar-1",
-                "on_click": true,
-                "on_hover": true,
-                "cursor": "pointer",
-                "tooltip": "Bar 1: 200 units"
-            }
+            "type": "group",
+            "id": "bar-1",
+            "on_click": true,
+            "on_hover": true,
+            "cursor": "pointer",
+            "tooltip": "Bar 1: 200 units",
+            "children": [
+                {"type": "rect", "x": 10, "y": 20, "w": 30, "h": 40, "fill": "#ff0000"}
+            ]
         });
         let result = parse_interactive_element(&shape, "default").unwrap();
         assert_eq!(result.id, "bar-1");
@@ -2695,64 +2620,60 @@ mod tests {
         assert!(result.on_hover);
         assert_eq!(result.cursor.as_deref(), Some("pointer"));
         assert_eq!(result.tooltip.as_deref(), Some("Bar 1: 200 units"));
-        assert!(matches!(
-            result.hit_region,
-            HitRegion::Rect {
-                x: _,
-                y: _,
-                w: _,
-                h: _
-            }
-        ));
+        assert!(matches!(result.hit_region, HitRegion::Rect { .. }));
     }
 
     #[test]
-    fn parse_interactive_circle() {
+    fn parse_interactive_group_with_drag() {
         let shape = json!({
-            "type": "circle",
-            "x": 50, "y": 50, "r": 20,
-            "interactive": {
-                "id": "dot-1",
-                "on_click": true,
-                "draggable": true,
-                "drag_axis": "x"
-            }
+            "type": "group",
+            "id": "dot-1",
+            "on_click": true,
+            "draggable": true,
+            "drag_axis": "x",
+            "children": [
+                {"type": "circle", "x": 50, "y": 50, "r": 20}
+            ]
         });
         let result = parse_interactive_element(&shape, "layer1").unwrap();
         assert_eq!(result.id, "dot-1");
         assert!(result.draggable);
         assert_eq!(result.drag_axis, DragAxis::X);
-        assert!(matches!(result.hit_region, HitRegion::Circle { .. }));
+        // Group hit region is a bounding box (Rect), not Circle.
+        assert!(matches!(result.hit_region, HitRegion::Rect { .. }));
     }
 
     #[test]
-    fn parse_interactive_with_hit_rect() {
+    fn parse_interactive_group_with_hit_rect() {
         let shape = json!({
-            "type": "path",
-            "commands": [["move_to", 0, 0], ["line_to", 100, 100]],
-            "interactive": {
-                "id": "path-1",
-                "on_click": true,
-                "hit_rect": {"x": 0, "y": 0, "w": 100, "h": 100}
-            }
+            "type": "group",
+            "id": "path-group",
+            "on_click": true,
+            "hit_rect": {"x": 0, "y": 0, "w": 100, "h": 100},
+            "children": [
+                {"type": "path", "commands": [["move_to", 0, 0], ["line_to", 100, 100]]}
+            ]
         });
         let result = parse_interactive_element(&shape, "default").unwrap();
-        assert_eq!(result.id, "path-1");
+        assert_eq!(result.id, "path-group");
         assert!(matches!(result.hit_region, HitRegion::Rect { .. }));
     }
 
     #[test]
     fn parse_interactive_missing_id_returns_none() {
+        // Group without an id is not interactive.
         let shape = json!({
-            "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10,
-            "interactive": {"on_click": true}
+            "type": "group",
+            "on_click": true,
+            "children": [{"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10}]
         });
         assert!(parse_interactive_element(&shape, "default").is_none());
     }
 
     #[test]
-    fn parse_interactive_no_field_returns_none() {
-        let shape = json!({"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10});
+    fn parse_interactive_non_group_returns_none() {
+        // Only groups can be interactive elements.
+        let shape = json!({"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10, "id": "r"});
         assert!(parse_interactive_element(&shape, "default").is_none());
     }
 
@@ -2787,22 +2708,21 @@ mod tests {
 
     #[test]
     fn compute_hit_region_group_with_rect_children() {
+        // Hit regions are in LOCAL coordinates (no group offset applied).
         let shape = json!({
             "type": "group",
-            "x": 50.0, "y": 100.0,
-            "interactive": {"id": "grp1", "on_click": true},
+            "id": "grp1", "on_click": true,
             "children": [
                 {"type": "rect", "x": 0, "y": 0, "w": 100, "h": 40},
                 {"type": "rect", "x": 10, "y": 50, "w": 80, "h": 20}
             ]
         });
-        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
-        let region = compute_hit_region(&shape, interactive).unwrap();
-        // Bounding box of children: x=0..100, y=0..70, offset by group's x/y.
+        let region = compute_hit_region(&shape).unwrap();
+        // Bounding box of children in local space: x=0..100, y=0..70.
         match region {
             HitRegion::Rect { x, y, w, h } => {
-                assert!((x - 50.0).abs() < 0.01);
-                assert!((y - 100.0).abs() < 0.01);
+                assert!((x - 0.0).abs() < 0.01);
+                assert!((y - 0.0).abs() < 0.01);
                 assert!((w - 100.0).abs() < 0.01);
                 assert!((h - 70.0).abs() < 0.01);
             }
@@ -2814,21 +2734,19 @@ mod tests {
     fn compute_hit_region_group_with_mixed_children() {
         let shape = json!({
             "type": "group",
-            "x": 10.0, "y": 20.0,
-            "interactive": {"id": "grp2", "on_click": true},
+            "id": "grp2", "on_click": true,
             "children": [
                 {"type": "rect", "x": 0, "y": 0, "w": 50, "h": 30},
                 {"type": "circle", "x": 80, "y": 15, "r": 10}
             ]
         });
-        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
-        let region = compute_hit_region(&shape, interactive).unwrap();
+        let region = compute_hit_region(&shape).unwrap();
         // Rect: 0..50, 0..30; Circle: 70..90, 5..25
-        // Union: 0..90, 0..30 (rect extends lower), offset by 10, 20
+        // Union in local space: 0..90, 0..30
         match region {
             HitRegion::Rect { x, y, w, h } => {
-                assert!((x - 10.0).abs() < 0.01);
-                assert!((y - 20.0).abs() < 0.01);
+                assert!((x - 0.0).abs() < 0.01);
+                assert!((y - 0.0).abs() < 0.01);
                 assert!((w - 90.0).abs() < 0.01);
                 assert!((h - 30.0).abs() < 0.01);
             }
@@ -2840,27 +2758,22 @@ mod tests {
     fn compute_hit_region_group_no_children() {
         let shape = json!({
             "type": "group",
-            "x": 0.0, "y": 0.0,
-            "interactive": {"id": "empty", "on_click": true},
+            "id": "empty", "on_click": true,
             "children": []
         });
-        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
-        // No computable bounds from empty children.
-        assert!(compute_hit_region(&shape, interactive).is_none());
+        assert!(compute_hit_region(&shape).is_none());
     }
 
     #[test]
     fn parse_interactive_group() {
+        // New format: interactive fields at top level, no nested "interactive".
         let shape = json!({
             "type": "group",
-            "x": 50, "y": 100,
-            "interactive": {
-                "id": "btn",
-                "on_click": true,
-                "on_hover": true,
-                "cursor": "pointer",
-                "a11y": {"role": "button", "label": "Save"}
-            },
+            "id": "btn",
+            "on_click": true,
+            "on_hover": true,
+            "cursor": "pointer",
+            "a11y": {"role": "button", "label": "Save"},
             "children": [
                 {"type": "rect", "x": 0, "y": 0, "w": 100, "h": 40, "fill": "#3498db"},
                 {"type": "text", "x": 30, "y": 25, "content": "Save", "fill": "#ccc"}
@@ -2872,35 +2785,94 @@ mod tests {
         assert!(result.on_hover);
         assert_eq!(result.cursor.as_deref(), Some("pointer"));
         assert!(result.a11y.is_some());
+        assert!(result.show_focus_ring); // default true
+        assert!(!result.focusable); // default false
         match result.hit_region {
             HitRegion::Rect { x, y, w, h } => {
-                // Group offset (50, 100) + bounding box of children.
-                // Rect child: (0,0,100,40). Text child: (30,9,68.4,25).
-                // Union: (0, 0, 100, 40). With offset: (50, 100, 100, 40).
-                assert!((x - 50.0).abs() < 0.01);
-                assert!((y - 100.0).abs() < 0.01);
-                assert!((w - 100.0).abs() < 0.01);
-                assert!((h - 40.0).abs() < 0.01);
+                // Bounding box in local space. Union of:
+                //   rect child: (0, 0) -> (100, 40)
+                //   text child: (30, 9) -> (60.4, 25) (estimated)
+                // Result: (0, 0) -> (100, 40)
+                assert!((x - 0.0).abs() < 0.01, "x={x}");
+                assert!((y - 0.0).abs() < 0.01, "y={y}");
+                assert!((w - 100.0).abs() < 0.01, "w={w}");
+                assert!((h - 40.0).abs() < 0.01, "h={h}");
             }
             other => panic!("expected Rect, got {other:?}"),
         }
     }
 
     #[test]
+    fn parse_interactive_element_skips_non_groups() {
+        let shape = json!({
+            "type": "rect", "x": 0, "y": 0, "w": 100, "h": 40,
+            "id": "rect-btn", "on_click": true
+        });
+        assert!(parse_interactive_element(&shape, "default").is_none());
+    }
+
+    #[test]
+    fn parse_interactive_group_with_new_fields() {
+        let shape = json!({
+            "type": "group",
+            "id": "toggle",
+            "on_click": true,
+            "focus_style": {"stroke": "#3b82f6"},
+            "show_focus_ring": false,
+            "focusable": true,
+            "children": [
+                {"type": "rect", "x": 0, "y": 0, "w": 60, "h": 30}
+            ]
+        });
+        let result = parse_interactive_element(&shape, "default").unwrap();
+        assert_eq!(result.id, "toggle");
+        assert!(result.has_focus_style);
+        assert!(!result.show_focus_ring);
+        assert!(result.focusable);
+    }
+
+    #[test]
+    fn group_translation_from_transforms() {
+        let group = json!({
+            "type": "group",
+            "transforms": [
+                {"type": "translate", "x": 50.0, "y": 30.0},
+                {"type": "rotate", "angle": 0.5},
+                {"type": "translate", "x": 10.0, "y": 0.0}
+            ],
+            "children": []
+        });
+        let (tx, ty) = group_translation(&group);
+        assert!((tx - 60.0).abs() < 0.01);
+        assert!((ty - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn group_translation_no_transforms() {
+        let group = json!({"type": "group", "children": []});
+        let (tx, ty) = group_translation(&group);
+        assert_eq!(tx, 0.0);
+        assert_eq!(ty, 0.0);
+    }
+
+    #[test]
     fn collect_interactive_elements_recurses_into_groups() {
         let shapes = vec![
+            // Non-group shapes are skipped, even with an id.
             json!({
                 "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10,
-                "interactive": {"id": "top-rect", "on_click": true}
+                "id": "top-rect", "on_click": true
             }),
+            // Interactive group with a nested interactive group.
             json!({
-                "type": "group", "x": 0, "y": 0,
-                "interactive": {"id": "grp", "on_click": true},
+                "type": "group",
+                "id": "grp", "on_click": true,
                 "children": [
                     {"type": "rect", "x": 0, "y": 0, "w": 50, "h": 50},
                     {
-                        "type": "group", "x": 10, "y": 10,
-                        "interactive": {"id": "nested-grp", "on_click": true},
+                        "type": "group",
+                        "transforms": [{"type": "translate", "x": 10, "y": 10}],
+                        "id": "nested-grp", "on_click": true,
                         "children": [
                             {"type": "circle", "x": 5, "y": 5, "r": 5}
                         ]
@@ -2911,7 +2883,9 @@ mod tests {
         let mut result = Vec::new();
         collect_interactive_elements(&shapes, "default", 0.0, 0.0, &mut result);
         let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
-        assert!(ids.contains(&"top-rect"));
+        // Non-group "top-rect" is NOT collected.
+        assert!(!ids.contains(&"top-rect"));
+        // Both groups are collected.
         assert!(ids.contains(&"grp"));
         assert!(ids.contains(&"nested-grp"));
     }
@@ -2940,9 +2914,7 @@ mod tests {
     fn interactive_group_with_path_child_gets_hit_region() {
         let shape = json!({
             "type": "group",
-            "x": 50.0,
-            "y": 50.0,
-            "interactive": {"id": "star", "on_click": true},
+            "id": "star", "on_click": true,
             "children": [
                 {
                     "type": "path",
@@ -2958,8 +2930,7 @@ mod tests {
                 }
             ]
         });
-        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
-        let region = compute_hit_region(&shape, interactive);
+        let region = compute_hit_region(&shape);
         assert!(
             region.is_some(),
             "group with path child should have a hit region"
@@ -2967,52 +2938,25 @@ mod tests {
     }
 
     #[test]
-    fn hit_rect_on_group_offsets_by_group_position() {
+    fn hit_rect_on_group_is_local_coordinates() {
+        // hit_rect is in local coordinates -- no transform offset applied.
+        // Transform offsets are handled by the transform matrix during hit testing.
         let shape = json!({
             "type": "group",
-            "x": 50.0,
-            "y": 14.0,
-            "interactive": {
-                "id": "star",
-                "on_click": true,
-                "hit_rect": {"x": -12.0, "y": -12.0, "w": 28.0, "h": 28.0}
-            },
+            "id": "star", "on_click": true,
+            "hit_rect": {"x": -12.0, "y": -12.0, "w": 28.0, "h": 28.0},
             "children": [
                 {"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10}
             ]
         });
-        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
-        let region = compute_hit_region(&shape, interactive).unwrap();
+        let region = compute_hit_region(&shape).unwrap();
         match region {
             HitRegion::Rect { x, y, w, h } => {
-                // hit_rect (-12, -12) offset by group position (50, 14)
-                assert!((x - 38.0).abs() < 0.01, "x should be 50-12=38, got {x}");
-                assert!((y - 2.0).abs() < 0.01, "y should be 14-12=2, got {y}");
+                // Local coordinates, no offset.
+                assert!((x - (-12.0)).abs() < 0.01, "x should be -12, got {x}");
+                assert!((y - (-12.0)).abs() < 0.01, "y should be -12, got {y}");
                 assert!((w - 28.0).abs() < 0.01);
                 assert!((h - 28.0).abs() < 0.01);
-            }
-            other => panic!("expected Rect, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn hit_rect_on_non_group_is_absolute() {
-        let shape = json!({
-            "type": "rect",
-            "x": 100.0, "y": 200.0, "w": 50.0, "h": 50.0,
-            "interactive": {
-                "id": "btn",
-                "on_click": true,
-                "hit_rect": {"x": 10.0, "y": 20.0, "w": 60.0, "h": 60.0}
-            }
-        });
-        let interactive = shape.get("interactive").unwrap().as_object().unwrap();
-        let region = compute_hit_region(&shape, interactive).unwrap();
-        match region {
-            HitRegion::Rect { x, y, .. } => {
-                // Non-group hit_rect is NOT offset by shape position
-                assert!((x - 10.0).abs() < 0.01, "x should be 10, got {x}");
-                assert!((y - 20.0).abs() < 0.01, "y should be 20, got {y}");
             }
             other => panic!("expected Rect, got {other:?}"),
         }
