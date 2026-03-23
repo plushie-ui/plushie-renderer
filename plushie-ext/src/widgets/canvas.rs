@@ -361,6 +361,10 @@ pub(crate) struct InteractiveElement {
     /// Whether to show the default focus ring when this element is focused.
     /// Defaults to `true`. Set to `false` when using `focus_style` instead.
     pub show_focus_ring: bool,
+    /// Corner radius for the focus ring. Defaults to `inflate + 1.0` (~3px).
+    /// Set to `h/2 + inflate` for pill shapes, `r + inflate` for circles.
+    /// Only used when `show_focus_ring` is `true` and the hit region is Rect.
+    pub focus_ring_radius: Option<f32>,
     /// Whether this group acts as a Tab stop for two-level navigation.
     /// When true, Tab navigates between focusable groups, and arrows
     /// navigate between elements within the focused group.
@@ -497,7 +501,7 @@ fn parse_interactive_element(group: &Value, layer_name: &str) -> Option<Interact
         // Interactive
         "id", "on_click", "on_hover", "cursor", "draggable", "drag_axis",
         "drag_bounds", "tooltip", "hit_rect", "hover_style", "pressed_style",
-        "focus_style", "show_focus_ring", "focusable",
+        "focus_style", "show_focus_ring", "focus_ring_radius", "focusable",
         // Accessibility
         "a11y",
     ];
@@ -590,6 +594,10 @@ fn parse_interactive_element(group: &Value, layer_name: &str) -> Option<Interact
             .get("show_focus_ring")
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
+        focus_ring_radius: group
+            .get("focus_ring_radius")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32),
         focusable: group
             .get("focusable")
             .and_then(|v| v.as_bool())
@@ -931,6 +939,10 @@ struct CanvasState {
     /// focus visuals (focus_style, focus ring) when the canvas is
     /// unfocused but `focused_id` is preserved for re-entry.
     canvas_focused: bool,
+    /// Whether the focus indicator should be visible. `true` for
+    /// keyboard navigation (Tab), `false` for mouse clicks.
+    /// Matches iced's "focus-visible" pattern.
+    focus_visible: bool,
 }
 
 struct CanvasProgram<'a> {
@@ -987,7 +999,7 @@ impl CanvasProgram<'_> {
         }
 
         // Keyboard focus with focus_style (only when canvas has iced focus).
-        if state.canvas_focused {
+        if state.canvas_focused && state.focus_visible {
         if let Some(ref focused_id) = state.focused_id {
             if let Some(shape) = self
                 .interactive_elements
@@ -1108,7 +1120,7 @@ impl CanvasProgram<'_> {
         let hovered = state.hovered_element.as_deref();
         let pressed = state.pressed_element.as_deref();
         // Only apply focus_style when the canvas has iced-level focus.
-        let focused = if state.canvas_focused {
+        let focused = if state.canvas_focused && state.focus_visible {
             state.focused_id.as_deref()
         } else {
             None
@@ -1459,10 +1471,13 @@ fn draw_focus_ring(
 
     match &element.hit_region {
         HitRegion::Rect { x, y, w, h } => {
+            let radius = element
+                .focus_ring_radius
+                .unwrap_or(inflate + 1.0);
             let path = canvas::Path::rounded_rectangle(
                 Point::new(x - inflate, y - inflate),
                 Size::new(w + inflate * 2.0, h + inflate * 2.0),
-                iced::border::Radius::from(inflate + 1.0),
+                iced::border::Radius::from(radius),
             );
             frame.stroke(&path, ring_stroke);
         }
@@ -2362,6 +2377,10 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 let btn_str = serialize_mouse_button_for_canvas(button);
                 let mut action: Option<iced::widget::Action<Message>> = None;
 
+                // Mouse interaction clears focus-visible (focus ring only
+                // shows for keyboard navigation, not mouse clicks).
+                state.focus_visible = false;
+
                 // -- Shape press: start drag or track pressed --
                 // Drag and click are mutually exclusive: if a shape is
                 // draggable, we start a drag (click never fires for it).
@@ -2544,7 +2563,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
 
         // Focus ring overlay (uncached, drawn on top of everything).
         // Only drawn when the canvas has iced-level focus.
-        if state.canvas_focused {
+        if state.canvas_focused && state.focus_visible {
         if let Some(focused_id) = &state.focused_id {
             if let Some(element) = self.interactive_elements.iter().find(|e| &e.id == focused_id) {
                 if element.show_focus_ring {
@@ -2595,8 +2614,10 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
     fn on_focus_gained(
         &self,
         state: &mut CanvasState,
+        focus_visible: bool,
     ) -> Vec<iced::widget::Action<Message>> {
         state.canvas_focused = true;
+        state.focus_visible = focus_visible;
         let mut actions = vec![iced::widget::Action::publish(Message::CanvasFocused {
             canvas_id: self.id.clone(),
         })];
@@ -4269,6 +4290,7 @@ mod tests {
             has_pressed_style: false,
             has_focus_style: false,
             show_focus_ring: true,
+            focus_ring_radius: None,
             focusable: false,
             parent_group: None,
             tooltip: None,
@@ -4289,6 +4311,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         assert_eq!(program.resolve_focus_index(&state), Some(1));
     }
@@ -4306,6 +4329,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -4323,6 +4347,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -4340,6 +4365,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -4370,6 +4396,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -4400,6 +4427,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let msg = program.set_focus(&mut state, Some(0));
         assert!(msg.is_none());
@@ -4419,6 +4447,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_some());
@@ -4449,6 +4478,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_none());
@@ -4467,6 +4497,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         // Index 99 is out of bounds -> new_id becomes None -> blur.
         let msg = program.set_focus(&mut state, Some(99));
@@ -4491,6 +4522,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4511,6 +4543,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: true,
+            focus_visible: true,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4535,6 +4568,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: true,
+            focus_visible: true,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers.len(), 2);
@@ -4561,6 +4595,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: true,
+            focus_visible: true,
         };
         let layers = program.layers_with_active_interaction(&state);
         // Should not duplicate "ui".
@@ -4580,6 +4615,7 @@ mod tests {
             focused_group: None,
             last_consumed_pending: None,
             canvas_focused: false,
+            focus_visible: false,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert!(layers.is_empty());
