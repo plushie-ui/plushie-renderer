@@ -113,7 +113,6 @@ jobs:
           wasm-opt plushie-renderer-wasm/pkg/plushie_renderer_wasm_bg.wasm \
             -Oz \
             --enable-bulk-memory \
-            --enable-bulk-memory-opt \
             --enable-mutable-globals \
             --enable-nontrapping-float-to-int \
             --enable-sign-ext \
