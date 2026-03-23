@@ -359,6 +359,14 @@ pub(crate) struct InteractiveElement {
     /// When true, Tab navigates between focusable groups, and arrows
     /// navigate between elements within the focused group.
     pub focusable: bool,
+    /// ID of the parent focusable group, if this element is a child
+    /// within a focusable group. `None` for top-level elements and
+    /// for focusable groups themselves.
+    ///
+    /// Used for two-level navigation: Tab moves between elements with
+    /// `parent_group == None`, arrows move within elements sharing the
+    /// same `parent_group`.
+    pub parent_group: Option<String>,
     /// Tooltip text to show on hover.
     pub tooltip: Option<String>,
     /// Accessibility overrides for this element. Parsed from the `a11y`
@@ -580,6 +588,8 @@ fn parse_interactive_element(group: &Value, layer_name: &str) -> Option<Interact
             .get("focusable")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        // Set by collect_interactive_elements based on nesting context.
+        parent_group: None,
         tooltip: group
             .get("tooltip")
             .and_then(|v| v.as_str())
@@ -902,6 +912,10 @@ struct CanvasState {
     /// between renders. When the focused element is removed, focus is
     /// cleared and a blur event is emitted.
     focused_id: Option<String>,
+    /// ID of the focusable group that currently has group-level focus
+    /// in two-level navigation. `None` when navigating at the top level
+    /// or when no focusable groups exist.
+    focused_group: Option<String>,
 }
 
 struct CanvasProgram<'a> {
@@ -1030,6 +1044,30 @@ impl CanvasProgram<'_> {
         } else {
             None
         }
+    }
+
+    /// Get the indices of "top-level" entries for Tab navigation.
+    ///
+    /// Top-level entries are elements where `parent_group.is_none()`.
+    /// This includes standalone elements and focusable groups themselves
+    /// (but not children of focusable groups).
+    fn top_level_indices(&self) -> Vec<usize> {
+        self.interactive_elements
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.parent_group.is_none())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Get the indices of children within a focusable group.
+    fn group_child_indices(&self, group_id: &str) -> Vec<usize> {
+        self.interactive_elements
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.parent_group.as_deref() == Some(group_id))
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Draw shapes with hover/pressed/focus style overrides applied to the
@@ -2018,6 +2056,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         if let Some(msg) = self.set_focus(state, clicked_idx) {
                             action = Some(pick_action(action, iced::widget::Action::publish(msg)));
                         }
+                        // Update focused_group context for two-level navigation.
+                        state.focused_group = shape.parent_group.clone();
 
                         if shape.draggable {
                             state.dragging = Some(DragState {
@@ -2028,7 +2068,8 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                             state.pressed_element = Some(shape.id.clone());
                         }
                     } else if state.focused_id.is_some() {
-                        // Click on empty area -- clear focus.
+                        // Click on empty area -- clear focus and group context.
+                        state.focused_group = None;
                         if let Some(msg) = self.set_focus(state, None) {
                             action = Some(pick_action(action, iced::widget::Action::publish(msg)));
                         }
@@ -2124,16 +2165,12 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                 }
 
                 use keyboard::key::Named;
-                let count = self.interactive_elements.len();
 
                 // Resolve focused_id to a current index. If the focused
-                // element was removed between renders, clear focus and
-                // emit blur before handling the new key.
+                // element was removed between renders, clear focus.
                 let current_idx = self.resolve_focus_index(state);
                 if current_idx.is_none() && state.focused_id.is_some() {
-                    // Focused element was removed between renders. Emit
-                    // blur and consume this keypress. The next keypress
-                    // will start fresh with focused_id = None.
+                    state.focused_group = None;
                     if let Some(msg) = self.set_focus(state, None) {
                         return Some(iced::widget::Action::publish(msg).and_capture());
                     }
@@ -2147,69 +2184,174 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     }
                 };
 
+                // Determine the navigation scope: when inside a focusable
+                // group, arrows navigate the group's children. Otherwise,
+                // arrows navigate the full flat list. Tab always moves
+                // between top-level entries.
+                let has_focusable_groups = self.interactive_elements.iter().any(|e| e.focusable);
+
+                // Arrow navigation indices: group children if in a group,
+                // otherwise the full flat list.
+                let arrow_indices: Vec<usize> = if let Some(ref gid) = state.focused_group {
+                    self.group_child_indices(gid)
+                } else if has_focusable_groups {
+                    // At top level with focusable groups: arrows navigate
+                    // top-level entries only.
+                    self.top_level_indices()
+                } else {
+                    // No focusable groups at all: arrows navigate flat list.
+                    (0..self.interactive_elements.len()).collect()
+                };
+
+                // Find current element's position within the arrow scope.
+                let arrow_pos = current_idx.and_then(|ci| {
+                    arrow_indices.iter().position(|&i| i == ci)
+                });
+                let arrow_count = arrow_indices.len();
+
                 match key {
+                    // -- Tab: always moves between top-level entries --
                     keyboard::Key::Named(Named::Tab) if !modifiers.shift() => {
-                        match current_idx {
-                            None => focus_to(state, Some(0)),
-                            Some(idx) if idx + 1 < count => focus_to(state, Some(idx + 1)),
+                        let top = self.top_level_indices();
+                        let top_pos = current_idx.and_then(|ci| {
+                            // Current element might be a group child.
+                            // Find the parent group's position in top-level.
+                            if let Some(ref gid) = state.focused_group {
+                                top.iter().position(|&i| self.interactive_elements[i].id == *gid)
+                            } else {
+                                top.iter().position(|&i| i == ci)
+                            }
+                        });
+                        match top_pos {
+                            None => {
+                                // No current focus -> focus first top-level entry.
+                                if let Some(&first) = top.first() {
+                                    state.focused_group = None;
+                                    let elem = &self.interactive_elements[first];
+                                    if elem.focusable {
+                                        // Enter the focusable group: focus its first child.
+                                        state.focused_group = Some(elem.id.clone());
+                                        let children = self.group_child_indices(&elem.id);
+                                        if let Some(&first_child) = children.first() {
+                                            focus_to(state, Some(first_child))
+                                        } else {
+                                            focus_to(state, Some(first))
+                                        }
+                                    } else {
+                                        focus_to(state, Some(first))
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
+                            Some(pos) if pos + 1 < top.len() => {
+                                // Move to next top-level entry.
+                                let next_idx = top[pos + 1];
+                                let elem = &self.interactive_elements[next_idx];
+                                if elem.focusable {
+                                    state.focused_group = Some(elem.id.clone());
+                                    let children = self.group_child_indices(&elem.id);
+                                    if let Some(&first_child) = children.first() {
+                                        focus_to(state, Some(first_child))
+                                    } else {
+                                        focus_to(state, Some(next_idx))
+                                    }
+                                } else {
+                                    state.focused_group = None;
+                                    focus_to(state, Some(next_idx))
+                                }
+                            }
                             Some(_) => {
-                                // At last element -- let Tab propagate.
-                                // DON'T clear focused_id here. When Tab
-                                // moves iced focus to the next widget,
-                                // on_focus_lost will emit the blur event
-                                // and preserve focused_id for re-entry.
+                                // At last top-level entry. Let Tab propagate.
                                 None
                             }
                         }
                     }
                     keyboard::Key::Named(Named::Tab) if modifiers.shift() => {
-                        match current_idx {
-                            None => focus_to(state, Some(count - 1)),
+                        let top = self.top_level_indices();
+                        let top_pos = current_idx.and_then(|ci| {
+                            if let Some(ref gid) = state.focused_group {
+                                top.iter().position(|&i| self.interactive_elements[i].id == *gid)
+                            } else {
+                                top.iter().position(|&i| i == ci)
+                            }
+                        });
+                        match top_pos {
+                            None => {
+                                if let Some(&last) = top.last() {
+                                    let elem = &self.interactive_elements[last];
+                                    if elem.focusable {
+                                        state.focused_group = Some(elem.id.clone());
+                                        let children = self.group_child_indices(&elem.id);
+                                        if let Some(&last_child) = children.last() {
+                                            focus_to(state, Some(last_child))
+                                        } else {
+                                            focus_to(state, Some(last))
+                                        }
+                                    } else {
+                                        state.focused_group = None;
+                                        focus_to(state, Some(last))
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
                             Some(0) => {
-                                // At first element -- let Shift+Tab propagate.
-                                // Same as Tab-exit above: on_focus_lost handles blur.
+                                // At first top-level entry. Let Shift+Tab propagate.
                                 None
                             }
-                            Some(idx) => focus_to(state, Some(idx - 1)),
+                            Some(pos) => {
+                                let prev_idx = top[pos - 1];
+                                let elem = &self.interactive_elements[prev_idx];
+                                if elem.focusable {
+                                    state.focused_group = Some(elem.id.clone());
+                                    let children = self.group_child_indices(&elem.id);
+                                    if let Some(&last_child) = children.last() {
+                                        focus_to(state, Some(last_child))
+                                    } else {
+                                        focus_to(state, Some(prev_idx))
+                                    }
+                                } else {
+                                    state.focused_group = None;
+                                    focus_to(state, Some(prev_idx))
+                                }
+                            }
                         }
                     }
+
+                    // -- Arrows: navigate within current scope --
                     keyboard::Key::Named(Named::ArrowDown | Named::ArrowRight)
-                        if self.arrow_mode != ArrowMode::None =>
+                        if self.arrow_mode != ArrowMode::None && arrow_count > 0 =>
                     {
-                        match (current_idx, self.arrow_mode) {
-                            (None, _) => focus_to(state, Some(0)),
-                            (Some(idx), ArrowMode::Wrap) => {
-                                focus_to(state, Some((idx + 1) % count))
+                        match (arrow_pos, self.arrow_mode) {
+                            (None, _) => focus_to(state, Some(arrow_indices[0])),
+                            (Some(pos), ArrowMode::Wrap) => {
+                                focus_to(state, Some(arrow_indices[(pos + 1) % arrow_count]))
                             }
-                            (Some(idx), _) if idx + 1 < count => {
-                                focus_to(state, Some(idx + 1))
+                            (Some(pos), _) if pos + 1 < arrow_count => {
+                                focus_to(state, Some(arrow_indices[pos + 1]))
                             }
-                            (Some(_), ArrowMode::Clamp) => {
-                                // At last element, clamped. Capture but don't move.
-                                Some(iced::widget::Action::capture())
-                            }
-                            (Some(_), ArrowMode::Linear) => {
-                                // At last element, linear. Let arrow propagate.
-                                None
-                            }
+                            (Some(_), ArrowMode::Clamp) => Some(iced::widget::Action::capture()),
+                            (Some(_), ArrowMode::Linear) => None,
                             _ => None,
                         }
                     }
                     keyboard::Key::Named(Named::ArrowUp | Named::ArrowLeft)
-                        if self.arrow_mode != ArrowMode::None =>
+                        if self.arrow_mode != ArrowMode::None && arrow_count > 0 =>
                     {
-                        match (current_idx, self.arrow_mode) {
-                            (None, _) => focus_to(state, Some(count - 1)),
+                        match (arrow_pos, self.arrow_mode) {
+                            (None, _) => focus_to(state, Some(*arrow_indices.last().unwrap())),
                             (Some(0), ArrowMode::Wrap) => {
-                                focus_to(state, Some(count - 1))
+                                focus_to(state, Some(*arrow_indices.last().unwrap()))
                             }
-                            (Some(0), ArrowMode::Clamp) => {
-                                Some(iced::widget::Action::capture())
-                            }
+                            (Some(0), ArrowMode::Clamp) => Some(iced::widget::Action::capture()),
                             (Some(0), ArrowMode::Linear) => None,
-                            (Some(idx), _) => focus_to(state, Some(idx - 1)),
+                            (Some(pos), _) => {
+                                focus_to(state, Some(arrow_indices[pos - 1]))
+                            }
                         }
                     }
+
                     keyboard::Key::Named(Named::Enter | Named::Space) => {
                         if let Some(idx) = current_idx {
                             let element = &self.interactive_elements[idx];
@@ -2231,10 +2373,23 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                         }
                     }
                     keyboard::Key::Named(Named::Escape) => {
-                        if state.focused_id.is_some() {
-                            // Blur focused element and capture so Escape
-                            // doesn't propagate. Canvas keeps iced focus
-                            // but no internal element is focused.
+                        if state.focused_group.is_some() {
+                            // Inside a focusable group: exit to group level.
+                            // Focus the group element itself (top-level entry).
+                            // The SDK infers group exit from the focus moving
+                            // to an element with parent_group == None.
+                            let gid = state.focused_group.take().unwrap();
+                            let group_idx = self.interactive_elements
+                                .iter()
+                                .position(|e| e.id == gid);
+                            match self.set_focus(state, group_idx) {
+                                Some(msg) => {
+                                    Some(iced::widget::Action::publish(msg).and_capture())
+                                }
+                                None => Some(iced::widget::Action::capture()),
+                            }
+                        } else if state.focused_id.is_some() {
+                            // At top level: blur and clear focus.
                             match self.set_focus(state, None) {
                                 Some(msg) => {
                                     Some(iced::widget::Action::publish(msg).and_capture())
@@ -2242,22 +2397,29 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                                 None => Some(iced::widget::Action::capture()),
                             }
                         } else {
-                            // Nothing internally focused -- let Escape
-                            // propagate (iced will unfocus the canvas).
+                            // Nothing focused -- let Escape propagate.
                             None
                         }
                     }
-                    keyboard::Key::Named(Named::Home) => focus_to(state, Some(0)),
-                    keyboard::Key::Named(Named::End) => focus_to(state, Some(count - 1)),
-                    keyboard::Key::Named(Named::PageDown) => {
-                        let page_size = 10.min(count);
-                        let idx = current_idx.unwrap_or(0);
-                        focus_to(state, Some((idx + page_size).min(count - 1)))
+
+                    // Home/End/PageUp/PageDown navigate within current scope.
+                    keyboard::Key::Named(Named::Home) if !arrow_indices.is_empty() => {
+                        focus_to(state, Some(arrow_indices[0]))
                     }
-                    keyboard::Key::Named(Named::PageUp) => {
-                        let page_size = 10.min(count);
-                        let idx = current_idx.unwrap_or(0);
-                        focus_to(state, Some(idx.saturating_sub(page_size)))
+                    keyboard::Key::Named(Named::End) if !arrow_indices.is_empty() => {
+                        focus_to(state, Some(*arrow_indices.last().unwrap()))
+                    }
+                    keyboard::Key::Named(Named::PageDown) if !arrow_indices.is_empty() => {
+                        let page_size = 10.min(arrow_count);
+                        let pos = arrow_pos.unwrap_or(0);
+                        let new_pos = (pos + page_size).min(arrow_count - 1);
+                        focus_to(state, Some(arrow_indices[new_pos]))
+                    }
+                    keyboard::Key::Named(Named::PageUp) if !arrow_indices.is_empty() => {
+                        let page_size = 10.min(arrow_count);
+                        let pos = arrow_pos.unwrap_or(0);
+                        let new_pos = pos.saturating_sub(page_size);
+                        focus_to(state, Some(arrow_indices[new_pos]))
                     }
                     _ => None,
                 }
@@ -2403,6 +2565,7 @@ impl canvas::Program<Message> for CanvasProgram<'_> {
                     },
                 ));
                 state.focused_id = None;
+                state.focused_group = None;
             }
         }
         actions
@@ -2615,6 +2778,11 @@ pub(crate) fn json_color(val: &Value, key: &str) -> Color {
 /// rectangles (in canvas space). Elements are only hittable when the
 /// cursor falls within this clip region.
 ///
+/// `focusable_parent` is the ID of the nearest ancestor focusable group.
+/// Children of a focusable group get `parent_group = Some(group_id)`,
+/// which controls two-level keyboard navigation: Tab moves between
+/// top-level entries, arrows navigate within a focused group's children.
+///
 /// Only groups with an `"id"` field are collected as interactive elements.
 /// Non-group shapes are skipped regardless of any fields they carry.
 fn collect_interactive_elements(
@@ -2622,6 +2790,7 @@ fn collect_interactive_elements(
     layer_name: &str,
     parent_transform: TransformMatrix,
     parent_clip: Option<(f32, f32, f32, f32)>,
+    focusable_parent: Option<&str>,
     out: &mut Vec<InteractiveElement>,
 ) {
     for shape in shapes {
@@ -2644,15 +2813,12 @@ fn collect_interactive_elements(
         };
 
         // Intersect this group's clip (if any) with parent clip.
-        // The clip rect is in the group's local space -- transform its
-        // corners to canvas space and take the axis-aligned bounding box.
         let group_clip = if let Some(clip) = shape.get("clip").and_then(|v| v.as_object()) {
             let cx = clip.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let cy = clip.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let cw = clip.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let ch = clip.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
 
-            // Transform clip rect corners to canvas space.
             let corners = [
                 group_matrix.transform_point(cx, cy),
                 group_matrix.transform_point(cx + cw, cy),
@@ -2666,7 +2832,6 @@ fn collect_interactive_elements(
 
             let clip_in_canvas = (min_x, min_y, max_x - min_x, max_y - min_y);
 
-            // Intersect with parent clip.
             match parent_clip {
                 Some(pc) => Some(intersect_rects(pc, clip_in_canvas)),
                 None => Some(clip_in_canvas),
@@ -2676,16 +2841,39 @@ fn collect_interactive_elements(
         };
 
         // Collect this group if it's interactive (has an id).
+        // Determine the focusable context for children: if this group is
+        // focusable, its children get parent_group = this group's ID.
+        let mut child_focusable_parent = focusable_parent;
+        let mut focusable_group_id: Option<String> = None;
+
         if let Some(mut element) = parse_interactive_element(shape, layer_name) {
             element.transform = group_matrix;
             element.inverse_transform = group_matrix.inverse();
             element.clip_rect = group_clip;
+            element.parent_group = focusable_parent.map(|s| s.to_string());
+
+            if element.focusable {
+                focusable_group_id = Some(element.id.clone());
+            }
+
             out.push(element);
+        }
+
+        // If this group is focusable, its children belong to it.
+        if let Some(ref gid) = focusable_group_id {
+            child_focusable_parent = Some(gid.as_str());
         }
 
         // Recurse into group children to find nested interactive elements.
         if let Some(children) = shape.get("children").and_then(|v| v.as_array()) {
-            collect_interactive_elements(children, layer_name, group_matrix, group_clip, out);
+            collect_interactive_elements(
+                children,
+                layer_name,
+                group_matrix,
+                group_clip,
+                child_focusable_parent,
+                out,
+            );
         }
     }
 }
@@ -2719,7 +2907,7 @@ pub(crate) fn ensure_canvas_cache(node: &crate::protocol::TreeNode, caches: &mut
     let mut interactive_elements = Vec::new();
     for (layer_name, shapes_val) in &layer_map {
         if let Some(shapes_arr) = shapes_val.as_array() {
-            collect_interactive_elements(shapes_arr, layer_name, TransformMatrix::identity(), None, &mut interactive_elements);
+            collect_interactive_elements(shapes_arr, layer_name, TransformMatrix::identity(), None, None, &mut interactive_elements);
         }
     }
     caches
@@ -3385,7 +3573,7 @@ mod tests {
             }),
         ];
         let mut result = Vec::new();
-        collect_interactive_elements(&shapes, "default", TransformMatrix::identity(), None, &mut result);
+        collect_interactive_elements(&shapes, "default", TransformMatrix::identity(), None, None, &mut result);
         let ids: Vec<&str> = result.iter().map(|s| s.id.as_str()).collect();
         // Non-group "top-rect" is NOT collected.
         assert!(!ids.contains(&"top-rect"));
@@ -3549,7 +3737,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         assert_eq!(elements.len(), 1);
 
@@ -3575,7 +3763,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
 
         // Canvas point (35, 35) -> local via inverse rotate(-45deg):
@@ -3605,7 +3793,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
 
         // Inside clip region.
@@ -3649,7 +3837,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         assert_eq!(elements.len(), 1);
         let e = &elements[0];
@@ -3738,7 +3926,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         assert_eq!(elements.len(), 1);
         let clip = elements[0].clip_rect.unwrap();
@@ -3765,7 +3953,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         assert_eq!(elements.len(), 1);
         let clip = elements[0].clip_rect.unwrap();
@@ -3785,7 +3973,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         assert!(elements[0].clip_rect.is_none());
     }
@@ -3831,6 +4019,7 @@ mod tests {
             has_focus_style: false,
             show_focus_ring: true,
             focusable: false,
+            parent_group: None,
             tooltip: None,
             a11y: None,
         }
@@ -3846,6 +4035,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("b".to_string()),
+            focused_group: None,
         };
         assert_eq!(program.resolve_focus_index(&state), Some(1));
     }
@@ -3860,6 +4050,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("deleted".to_string()),
+            focused_group: None,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -3874,6 +4065,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: None,
+            focused_group: None,
         };
         assert_eq!(program.resolve_focus_index(&state), None);
     }
@@ -3888,6 +4080,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: None,
+            focused_group: None,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -3915,6 +4108,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("a".to_string()),
+            focused_group: None,
         };
         let msg = program.set_focus(&mut state, Some(1));
         assert!(msg.is_some());
@@ -3942,6 +4136,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("a".to_string()),
+            focused_group: None,
         };
         let msg = program.set_focus(&mut state, Some(0));
         assert!(msg.is_none());
@@ -3958,6 +4153,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("a".to_string()),
+            focused_group: None,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_some());
@@ -3985,6 +4181,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: None,
+            focused_group: None,
         };
         let msg = program.set_focus(&mut state, None);
         assert!(msg.is_none());
@@ -4000,6 +4197,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("a".to_string()),
+            focused_group: None,
         };
         // Index 99 is out of bounds -> new_id becomes None -> blur.
         let msg = program.set_focus(&mut state, Some(99));
@@ -4021,6 +4219,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: None,
+            focused_group: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4038,6 +4237,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("btn".to_string()),
+            focused_group: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers, vec!["ui"]);
@@ -4059,6 +4259,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("focus-btn".to_string()),
+            focused_group: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert_eq!(layers.len(), 2);
@@ -4082,6 +4283,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: Some("focus-btn".to_string()),
+            focused_group: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         // Should not duplicate "ui".
@@ -4098,6 +4300,7 @@ mod tests {
             pressed_element: None,
             dragging: None,
             focused_id: None,
+            focused_group: None,
         };
         let layers = program.layers_with_active_interaction(&state);
         assert!(layers.is_empty());
@@ -4122,7 +4325,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         assert_eq!(elements.len(), 1);
         assert!(elements[0].inverse_transform.is_none());
@@ -4170,7 +4373,7 @@ mod tests {
         })];
         let mut elements = Vec::new();
         collect_interactive_elements(
-            &shapes, "default", TransformMatrix::identity(), None, &mut elements,
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
         );
         let clip = elements[0].clip_rect.unwrap();
         assert!((clip.0 - 100.0).abs() < 0.01, "clip x={}", clip.0);
@@ -4282,5 +4485,108 @@ mod tests {
     #[test]
     fn arrow_mode_default_is_wrap() {
         assert_eq!(ArrowMode::default(), ArrowMode::Wrap);
+    }
+
+    // -- Focusable groups / two-level navigation --
+
+    #[test]
+    fn parent_group_set_for_children_of_focusable_group() {
+        // A focusable group "toolbar" with two children "btn-a" and "btn-b".
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "toolbar",
+            "focusable": true,
+            "on_click": true,
+            "children": [
+                {
+                    "type": "group",
+                    "id": "btn-a",
+                    "on_click": true,
+                    "children": [{"type": "rect", "x": 0, "y": 0, "w": 30, "h": 30}]
+                },
+                {
+                    "type": "group",
+                    "id": "btn-b",
+                    "on_click": true,
+                    "children": [{"type": "rect", "x": 40, "y": 0, "w": 30, "h": 30}]
+                }
+            ]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+        );
+        // Should collect: toolbar, btn-a, btn-b
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0].id, "toolbar");
+        assert!(elements[0].focusable);
+        assert_eq!(elements[0].parent_group, None); // top-level
+        assert_eq!(elements[1].id, "btn-a");
+        assert_eq!(elements[1].parent_group, Some("toolbar".to_string()));
+        assert_eq!(elements[2].id, "btn-b");
+        assert_eq!(elements[2].parent_group, Some("toolbar".to_string()));
+    }
+
+    #[test]
+    fn parent_group_none_without_focusable() {
+        // Non-focusable group with children: no parent_group set.
+        let shapes = vec![json!({
+            "type": "group",
+            "id": "container",
+            "on_click": true,
+            "children": [
+                {
+                    "type": "group",
+                    "id": "child",
+                    "on_click": true,
+                    "children": [{"type": "rect", "x": 0, "y": 0, "w": 10, "h": 10}]
+                }
+            ]
+        })];
+        let mut elements = Vec::new();
+        collect_interactive_elements(
+            &shapes, "default", TransformMatrix::identity(), None, None, &mut elements,
+        );
+        assert_eq!(elements.len(), 2);
+        assert_eq!(elements[0].parent_group, None);
+        assert_eq!(elements[1].parent_group, None);
+    }
+
+    #[test]
+    fn top_level_indices_excludes_group_children() {
+        let mut toolbar = test_element("toolbar");
+        toolbar.focusable = true;
+        let mut btn_a = test_element("btn-a");
+        btn_a.parent_group = Some("toolbar".to_string());
+        let mut btn_b = test_element("btn-b");
+        btn_b.parent_group = Some("toolbar".to_string());
+        let standalone = test_element("standalone");
+        let elements = vec![toolbar, btn_a, btn_b, standalone];
+        let program = test_program(&elements);
+        let top = program.top_level_indices();
+        // Only "toolbar" (idx 0) and "standalone" (idx 3) are top-level.
+        assert_eq!(top, vec![0, 3]);
+    }
+
+    #[test]
+    fn group_child_indices_returns_children() {
+        let mut toolbar = test_element("toolbar");
+        toolbar.focusable = true;
+        let mut btn_a = test_element("btn-a");
+        btn_a.parent_group = Some("toolbar".to_string());
+        let mut btn_b = test_element("btn-b");
+        btn_b.parent_group = Some("toolbar".to_string());
+        let standalone = test_element("standalone");
+        let elements = vec![toolbar, btn_a, btn_b, standalone];
+        let program = test_program(&elements);
+        let children = program.group_child_indices("toolbar");
+        assert_eq!(children, vec![1, 2]);
+    }
+
+    #[test]
+    fn group_child_indices_empty_for_nonexistent_group() {
+        let elements = vec![test_element("a"), test_element("b")];
+        let program = test_program(&elements);
+        assert!(program.group_child_indices("nonexistent").is_empty());
     }
 }
